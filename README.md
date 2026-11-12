@@ -34,12 +34,14 @@ supabase/migrations/      SQL schema, versioned in git
 
 Prerequisites: Node 20+, Python 3.11+, a Supabase project (see Deploy step 1).
 
+The web app's public Supabase values are already committed in `web/.env`. Only the API needs a secret:
+
 ```bash
-cp .env.example web/.env.local   # keep only the web section
-cp .env.example api/.env         # keep only the api section
+cp .env.example api/.env   # keep only the api section
 ```
 
-Fill in the values from your Supabase dashboard (Project Settings -> API Keys / JWT Keys).
+Then set `SUPABASE_SERVICE_ROLE_KEY` in `api/.env` (Supabase -> Project Settings -> API Keys -> secret key).
+Ask a teammate for it privately; never commit it.
 
 **Terminal 1: API** (http://localhost:8000)
 

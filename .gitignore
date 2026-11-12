@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# web/.env holds only public NEXT_PUBLIC_* values and is committed on purpose.
+!web/.env
 
 # Node / Next.js
 node_modules/

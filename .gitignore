@@ -1,0 +1,26 @@
+# Env files (real secrets). Only .env.example is committed.
+.env
+.env.*
+!.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Local AI assistant notes (kept off GitHub)
+CLAUDE.md

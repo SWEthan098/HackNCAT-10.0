@@ -4,7 +4,8 @@ The technical source of truth for this repository. Update it in the same pull re
 it describes. When the challenge arrives, add a **Challenge specification** section at the top (see
 [HACKATHON_WORKFLOW.md](HACKATHON_WORKFLOW.md) step 7); everything below stays true until changed.
 
-Status: starter platform, no challenge-specific features yet. Last verified 2026-11-13.
+Status: starter platform, no challenge-specific features yet. Last verified 2026-11-13. Team and
+ownership: [TEAM.md](TEAM.md).
 
 ## 1. What exists today
 
@@ -19,7 +20,8 @@ Status: starter platform, no challenge-specific features yet. Last verified 2026
 | Profile per user, created on sign-up, editable display name | `profiles` table, `GET /me`, `PATCH /me/profile` | E2E, pytest |
 | Dashboard with navigation cards to working routes | `web/src/app/dashboard` | E2E |
 | System status page (API, DB, session, AI) | `dashboard/system` | E2E |
-| AI playground calling the backend AI service | `dashboard/ai`, `POST /ai/chat` | pytest (mock); live provider needs a key |
+| AI playground calling the backend AI service | `dashboard/ai`, `POST /ai/chat` | pytest (mock); E2E sends a real prompt; Groq verified live |
+| CI on every push and pull request | `.github/workflows/ci.yml` | first GitHub run passed |
 
 ## 2. Repository layout and conventions
 
@@ -80,22 +82,24 @@ Migrations in `supabase/migrations/`, applied in filename order:
 | Migration | Contents | Applied to the hosted project? |
 | --- | --- | --- |
 | `20261112000000_create_profiles.sql` | `profiles` table, RLS (select/update own row), `handle_new_user` trigger | Yes (table and trigger observed working) |
-| `20261113000000_profiles_hardening.sql` | idempotent trigger (`on conflict do nothing`), backfill of missing profiles, `set_updated_at()` trigger, length/https constraints, least-privilege grants | **Not yet**: needs a manual run (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#supabase)) |
+| `20261113000000_profiles_hardening.sql` | idempotent trigger (`on conflict do nothing`), backfill of missing profiles, `set_updated_at()` trigger, length/https constraints, least-privilege grants | Yes (2026-11-13). Verified live: constraints reject bad values, `updated_at` trigger fires, users can only read/update their own `display_name`/`avatar_url`, no insert/delete, anon reads nothing, every user has a profile |
 
 `public.profiles`
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | uuid PK | references `auth.users(id)` on delete cascade: one profile per user, no duplicates |
-| `display_name` | text | at most 80 chars (API validation; DB constraint after migration 2) |
-| `avatar_url` | text | https only (API validation; DB constraint after migration 2) |
+| `display_name` | text | at most 80 chars (API validation and DB constraint) |
+| `avatar_url` | text | https only (API validation and DB constraint) |
 | `created_at` | timestamptz | default `now()` |
-| `updated_at` | timestamptz | set by the API on update; by trigger after migration 2 |
+| `updated_at` | timestamptz | set by the `profiles_set_updated_at` trigger on every update |
 
 Profile creation is idempotent at three levels: the signup trigger, the backfill in migration 2,
 and `GET /me`, which upserts with `on_conflict=id, ignore_duplicates` if a row is somehow missing.
 
-No other tables exist. Do not add tables until the challenge requires them.
+No other tables exist. Do not add tables until the challenge requires them. New migrations are
+applied by hand in the Supabase SQL Editor (no database credentials live in this repo); record each
+one in the table above.
 
 ## 5. API
 
@@ -120,8 +124,9 @@ Details: [docs/AI.md](docs/AI.md). `api/services/ai/`:
 
 - `base.py`: provider-neutral `ChatMessage`, `AIRequest`, `AIResponse`, `Usage`, `AIProviderError`,
   `AIProvider` interface.
-- `groq_provider.py` (official `groq` SDK), `anthropic_provider.py` (official `anthropic` SDK,
-  Claude Opus 5.5 by default, server-side refusal fallback on), `mock_provider.py` (offline).
+- `groq_provider.py` (official `groq` SDK, default `openai/gpt-oss-120b`, verified live 2026-11-13),
+  `anthropic_provider.py` (official `anthropic` SDK, Claude Opus 5.5 by default, server-side refusal
+  fallback on; not yet tested live, no key), `mock_provider.py` (offline, used by CI).
 - `ai_service.py`: picks the provider from `AI_PROVIDER`, resolves the model (`AI_MODEL` or the
   provider default), measures latency, estimates cost (`pricing.py`), logs usage without content.
 - Timeouts (`AI_TIMEOUT_SECONDS`) and retries with backoff (`AI_MAX_RETRIES`, on 408/409/429/5xx)
@@ -136,7 +141,8 @@ import a provider SDK.
 | --- | --- | --- |
 | Hallmark (Nutlope/hallmark, MIT) | Claude Code design skill installed at `~/.claude/skills/hallmark`; its scaffold generated our tokens/base CSS, and its linter (`sloplint`) checks `web/src` | [docs/HALLMARK.md](docs/HALLMARK.md) |
 | Agent-Reach (Panniantong/Agent-Reach, MIT) | Claude Code research skill + `agent-reach` CLI on each developer machine; not an app dependency | [docs/AGENT_REACH.md](docs/AGENT_REACH.md) |
-| GitHub Actions | `.github/workflows/ci.yml` | [docs/GITHUB.md](docs/GITHUB.md) |
+| Groq | live AI provider (`GROQ_API_KEY` in `api/.env`) | [docs/AI.md](docs/AI.md) |
+| GitHub Actions | `.github/workflows/ci.yml`, passing | [docs/GITHUB.md](docs/GITHUB.md) |
 
 ## 8. Environments
 
@@ -155,4 +161,9 @@ All variables are documented in [.env.example](.env.example).
 - PKCE recovery links (requested from the app) must be opened in the same browser. Switching the
   Supabase "Reset password" email template to the token-hash link removes that limit
   ([docs/AUTH.md](docs/AUTH.md#email-templates)).
-- Migration 2 has to be applied by hand (no database credentials are stored in this repository).
+- There is one shared Supabase project for development and production. Schema changes and test
+  users affect the whole team (see [TEAM.md](TEAM.md#working-agreement)).
+- Nothing is deployed yet; production URLs, CORS origins and Supabase redirect URLs are still to be
+  set ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
+- gpt-oss models spend output tokens on reasoning; raise `AI_MAX_OUTPUT_TOKENS` (default 1024) for
+  long answers or the reply can come back cut short.

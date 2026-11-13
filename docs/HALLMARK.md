@@ -62,7 +62,7 @@ were checked visually with Playwright screenshots at 1280x800 and 390x844.
 
 ## Teammates
 
-Each developer installs the skill once:
+Miles owns design work ([TEAM.md](../TEAM.md)). Each developer installs the skill once:
 
 ```bash
 npx skills add nutlope/hallmark -g --agent claude-code

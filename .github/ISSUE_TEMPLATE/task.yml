@@ -26,6 +26,14 @@ body:
       options: [web, api, database, ai, deployment, docs, demo]
     validations:
       required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Owner
+      description: Who drives this task (see TEAM.md). Also assign them on the issue.
+      options: [Lead, Miles, Daylen, JLee, Unassigned]
+    validations:
+      required: true
   - type: textarea
     id: notes
     attributes:

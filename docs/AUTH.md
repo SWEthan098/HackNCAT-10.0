@@ -62,5 +62,8 @@ Each `auth.users` row gets a `public.profiles` row with the same UUID (trigger
 
 - 2026-11-13: removed two accounts after verifying each by user id and email: a never-confirmed
   account created with a typo in the owner's email address, and an earlier automated test account.
-  The owner's account and a teammate's account were kept. A password-reset email was requested for
-  the owner's account so the owner can choose a new password themselves.
+  All other accounts were kept. A password-reset email was requested for the owner's account so
+  the owner can choose a new password themselves.
+- Teammates create their own accounts through `/signup`; do not create accounts for each other.
+  The project is shared, so never delete a user you did not create (the E2E suite only deletes its
+  own `e2e-...@example.com` users).

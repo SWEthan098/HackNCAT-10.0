@@ -39,14 +39,18 @@ showed 2/2 actions working, through Exa after the Jina reader returned 401; `age
 youtube` succeeded on a second try (the first setup run hit a transient permissions error
 installing ffmpeg). The `agent-reach` skill shows up in Claude Code's skill list.
 
-**Manual step:** `~/.local/bin` is not on PATH yet (the automatic PATH change was not authorized).
-Run once in a terminal, then open a new one:
+`~/.local/bin` was then added to the user PATH with `uv tool update-shell` (2026-11-13); new
+terminals find `agent-reach` directly.
+
+**Teammates** install it the same way on their own machines (JLee first, as research owner):
 
 ```bash
-uv tool update-shell        # or add %USERPROFILE%\.local\bin to your user PATH
+python -m pip install --user uv            # or the official Astral installer
+uv tool install https://github.com/Panniantong/Agent-Reach/releases/latest/download/agent-reach.zip
+uv tool update-shell                       # then open a new terminal
+agent-reach setup
+agent-reach doctor --text                  # check what works
 ```
-
-Until then, call it as `%USERPROFILE%\.local\bin\agent-reach.exe`.
 
 ## Using it
 

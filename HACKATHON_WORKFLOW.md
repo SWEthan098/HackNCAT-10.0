@@ -1,7 +1,8 @@
 # Hackathon workflow
 
 From the moment the Lenovo, Cisco or Medtronic challenge is announced to the final demo. Templates
-for each step live in [`challenge/`](challenge/).
+for each step live in [`challenge/`](challenge/). Who leads each step is in [TEAM.md](TEAM.md): the
+lead runs steps 1, 3, 4, 7 and 8; JLee leads step 2; Miles and Daylen co-own step 5 for their layers.
 
 ## 1. Capture the original prompt (first 5 minutes)
 
@@ -12,7 +13,7 @@ for each step live in [`challenge/`](challenge/).
 
 ## 2. Research (30 to 60 minutes, in parallel)
 
-Split the questions between teammates. In Claude Code:
+Split the questions between teammates (JLee coordinates). In Claude Code:
 
 - Use the built-in web search and fetch for public pages first.
 - Use **Agent-Reach** when that is not enough: GitHub repos and READMEs, YouTube talk transcripts,
@@ -47,7 +48,7 @@ Map the product onto this starter:
 - Frontend: new pages under `web/src/app/dashboard/<feature>`, a NavCard on `/dashboard`, a link in
   `NAV_ITEMS` (`AppShell.tsx`), components from `@/components/ui`.
 - Backend: a router per feature in `api/routers/`, schemas, services; AI through
-  `services/ai` (choose provider and model now, see [docs/AI.md](docs/AI.md#choosing-a-provider)).
+  `services/ai` (Groq is live; confirm the model per feature, see [docs/AI.md](docs/AI.md#choosing-a-provider)).
 - Database: new tables as migrations with RLS in the same file.
 - External services, security needs, and what is deployed where.
 
@@ -66,10 +67,10 @@ contract the team builds against.
 
 ## 8. GitHub tasks
 
-Create one issue per task with the **Task** issue template, attach it to a milestone per roadmap
-phase (MVP, Polish, AI, Ship), assign an owner, and link it to the acceptance criterion it serves.
-With the GitHub CLI: `gh issue create --template task.yml`. Work on `feature/<issue>-<slug>` branches
-and open pull requests into `main` ([docs/GITHUB.md](docs/GITHUB.md)).
+Create one issue per task with the **Task** issue template (GitHub -> Issues -> New issue), attach
+it to a milestone per roadmap phase (MVP, Polish, AI, Ship), assign an owner, and link it to the
+acceptance criterion it serves. Work on `feature/<issue>-<slug>` branches (or your `dev/<name>`
+branch for small changes) and open pull requests into `main` ([docs/GITHUB.md](docs/GITHUB.md)).
 
 ## 9. Build in small verified increments
 

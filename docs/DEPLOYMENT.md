@@ -9,8 +9,8 @@ Supabase for redirect URLs.
 
 ## Supabase
 
-1. **Apply migrations** in filename order. `20261112000000_create_profiles.sql` is already live.
-   Apply `20261113000000_profiles_hardening.sql` (idempotent, safe to re-run):
+1. **Migrations.** Both current migrations are applied to the hosted project (2026-11-13). Apply
+   any new file in `supabase/migrations/` in filename order:
    - Dashboard: SQL Editor -> paste the file -> Run, or
    - CLI: `npx supabase login`, `npx supabase link --project-ref lyzkuyaetnlbvmwudskk`,
      `npx supabase db push`.
@@ -32,7 +32,9 @@ Supabase for redirect URLs.
    | `SUPABASE_URL` | `https://lyzkuyaetnlbvmwudskk.supabase.co` |
    | `SUPABASE_SERVICE_ROLE_KEY` | the secret key (sealed variable) |
    | `ALLOWED_ORIGINS` | `https://<vercel-domain>` (comma-separate preview domains if needed) |
-   | `AI_PROVIDER`, `AI_MODEL`, `GROQ_API_KEY` / `ANTHROPIC_API_KEY` | as chosen |
+   | `AI_PROVIDER` | `groq` |
+   | `GROQ_API_KEY` | the team Groq key (sealed variable) |
+   | `AI_MODEL` | empty for `openai/gpt-oss-120b`, or the model you chose |
    | `ENABLE_DOCS` | `true` only if judges should see Swagger |
 
 3. Generate a public domain and check `https://<railway-domain>/health/ready` shows
@@ -58,7 +60,7 @@ Run these against the deployed URLs before calling a deployment done:
 
 1. `/` loads; `/dashboard` redirects to `/login?next=%2Fdashboard`.
 2. Sign up a test user, land on `/dashboard`, reload, still signed in.
-3. Dashboard -> System status: all Pass (AI "Not configured" is acceptable without a key).
+3. Dashboard -> System status: all Pass, including AI provider; send one prompt on the AI page.
 4. Log out, log back in with the same credentials.
 5. Forgot password -> email arrives (needs custom SMTP or a team member's address) -> link opens
    `/reset-password` -> new password works.

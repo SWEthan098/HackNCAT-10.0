@@ -1,6 +1,6 @@
 # AI provider architecture
 
-All AI calls go through the FastAPI backend. API keys live only in `api/.env` (locally) or Railway
+Owner: JLee ([TEAM.md](../TEAM.md)). All AI calls go through the FastAPI backend. API keys live only in `api/.env` (locally) or Railway
 variables (production). Nothing AI-related is in the frontend except calls to `/ai/*`.
 
 ```
@@ -23,7 +23,7 @@ api/services/ai/
 | `ANTHROPIC_EFFORT` | `medium` | Claude thinking effort: `low`, `medium`, `high`, `xhigh`, `max` |
 | `AI_TIMEOUT_SECONDS` | `30` | Per-request timeout (SDK) |
 | `AI_MAX_RETRIES` | `2` | SDK retries with backoff on 408/409/429/5xx and connection errors (capped at 5) |
-| `AI_MAX_OUTPUT_TOKENS` | `1024` | Default response cap; a request may override up to 8192 |
+| `AI_MAX_OUTPUT_TOKENS` | `1024` | Default response cap; a request may override up to 8192. gpt-oss models count their reasoning here, so raise it for long answers |
 | `AI_PRICE_INPUT_PER_MTOK` / `AI_PRICE_OUTPUT_PER_MTOK` | empty | Prices for models without a built-in price (Groq). Empty = cost reported as unknown |
 
 Check the active configuration at `GET /ai/status` or on the dashboard's **System status** page.
@@ -70,7 +70,7 @@ Do this when the challenge is known, not before. Compare on the real task:
 | --- | --- | --- |
 | Strength | very low latency and cost on open-weight models | stronger reasoning, coding, analysis, long documents, tool use, multi-step agents |
 | Context | depends on model (check Groq's model page) | 1M tokens on current Opus/Sonnet/Haiku |
-| Price (per 1M tokens, input/output) | check console.groq.com (changes often) | Opus 5.5 $4/$20, Sonnet 5.5 $2/$10, Haiku 5.5 $0.10/$0.50 (Anthropic list prices, 2026-11) |
+| Price (per 1M tokens, input/output) | check console.groq.com (changes often); set `AI_PRICE_*` to track cost | Opus 5.5 $4/$20, Sonnet 5.5 $2/$10, Haiku 5.5 $0.10/$0.50 (Anthropic list prices, 2026-11) |
 | Rate limits | per-model, see your Groq console | per-tier, see your Anthropic console |
 
 A common split: Groq for high-volume, latency-sensitive calls (classification, extraction), Claude

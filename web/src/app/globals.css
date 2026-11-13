@@ -1,26 +1,120 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Cobalt (by request)
+ * nav: top bar, wordmark + section links + account menu · signature: the route cards on /dashboard · states: loading, empty, error, full
+ * axes: light/grotesk-sans/cool · posture: restrained · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P_ H_ E_ S_ R_ V_ · weakest: E, the starter has no real data yet; every region ships its loading, empty and error states instead */
 @import "tailwindcss";
+@import "./tokens.css";
+@import "./base.css";
 
+/* Fonts come from next/font (layout.tsx) and are routed through the theme tokens. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-display: var(--font-familjen), system-ui, sans-serif;
+  --font-body: var(--font-plex), system-ui, sans-serif;
+  --font-outlier: var(--font-jetbrains), ui-monospace, monospace;
 }
 
+/* Expose the Hallmark tokens as Tailwind utilities (bg-paper, text-ink, border-rule, ...).
+ * `inline` makes utilities read the :root token directly, so tokens.css stays the source. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-paper: var(--color-paper);
+  --color-paper-2: var(--color-paper-2);
+  --color-paper-3: var(--color-paper-3);
+  --color-ink: var(--color-ink);
+  --color-ink-2: var(--color-ink-2);
+  --color-muted: var(--color-muted);
+  --color-rule: var(--color-rule);
+  --color-rule-2: var(--color-rule-2);
+  --color-accent: var(--color-accent);
+  --color-accent-deep: var(--color-accent-deep);
+  --color-accent-wash: var(--color-accent-wash);
+  --color-accent-ink: var(--color-accent-ink);
+  --color-focus: var(--color-focus);
+  --color-error: var(--color-error);
+  --color-success: var(--color-success);
+  --color-graphite: var(--color-graphite);
+  --color-graphite-2: var(--color-graphite-2);
+  --color-graphite-ink: var(--color-graphite-ink);
+  --color-graphite-muted: var(--color-graphite-muted);
+  --color-key-face: var(--color-key-face);
+  --font-display: var(--font-display);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-outlier);
+  --radius-card: var(--radius-card);
+  --radius-input: var(--radius-input);
+  --shadow-card: var(--shadow-card);
+  --shadow-key: var(--shadow-key);
+  --shadow-key-accent: var(--shadow-key-accent);
+  --shadow-key-press: var(--shadow-key-press);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Keycap buttons: lift 1px on hover, sink on press (transform + shadow only). */
+.key {
+  box-shadow: var(--shadow-key);
+  transition: transform var(--dur-micro) var(--ease-out), box-shadow var(--dur-micro) var(--ease-out),
+    background-color var(--dur-micro) var(--ease-out);
+}
+.key-accent {
+  box-shadow: var(--shadow-key-accent);
+}
+@media (hover: hover) {
+  .key:not(:disabled):not([aria-disabled="true"]):hover {
+    transform: translateY(-1px);
   }
 }
+.key:not(:disabled):not([aria-disabled="true"]):active {
+  transform: translateY(1px);
+  box-shadow: var(--shadow-key-press);
+}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Inputs: the border never changes width; a transparent outline is reserved at rest. */
+.field-input {
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+}
+.field-input:focus-visible {
+  outline-color: var(--color-focus);
+}
+
+/* Spinner keeps turning under reduced motion: it is a progress signal, not decoration. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Toasts slide in; under reduced motion base.css collapses the duration to ~0. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.toast-in {
+  animation: toast-in var(--dur-short) var(--ease-out);
+}
+
+/* Native <dialog>: pinned centre, themed backdrop. */
+dialog.modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  max-height: min(80dvh, 40rem);
+}
+dialog.modal::backdrop {
+  background: color-mix(in oklab, var(--color-ink) 40%, transparent);
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--color-paper-2), var(--color-paper-3), var(--color-paper-2));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
 }

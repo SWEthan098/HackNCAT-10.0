@@ -1,75 +1,115 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { createClient } from "../../lib/supabase";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useRef, useState } from "react";
+import { useFormField } from "@/components/auth/useFormField";
+import { AuthShell } from "@/components/layout/AuthShell";
+import { Alert, Button, Field, PasswordField } from "@/components/ui";
+import { authErrorMessage, normalizeEmail, validateEmail } from "@/lib/auth/validation";
+import { ROUTES, safeNextPath } from "@/lib/routes";
+import { createClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+const NOTICES: Record<string, { tone: "info" | "error"; text: string }> = {
+  expired: { tone: "info", text: "Your session has expired. Log in again to continue." },
+  password_updated: { tone: "info", text: "Password updated. Log in with your new password." },
+  link_invalid: { tone: "error", text: "That link is invalid or has expired. Request a new one." },
+};
+
+function LoginForm() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const params = useSearchParams();
+  const next = safeNextPath(params.get("next"));
+  const notice = NOTICES[params.get("error") ?? params.get("reason") ?? ""];
 
-  async function submit(mode: "login" | "signup") {
+  const email = useFormField(validateEmail);
+  const password = useFormField((v) => (v ? null : "Enter your password."));
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const inFlight = useRef(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (inFlight.current) return; // guard against double submit (Enter + click)
+    const invalid = [email.check(), password.check()].some(Boolean);
+    if (invalid) return;
+    inFlight.current = true;
     setLoading(true);
-    setMessage(null);
-    const supabase = createClient();
-    const { data, error } =
-      mode === "login"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
-    setLoading(false);
-    if (error) return setMessage(error.message);
-    if (data.session) return router.push("/dashboard");
-    setMessage("Check your email to confirm your account, then log in.");
+    setError(null);
+    const { error: authError } = await createClient().auth.signInWithPassword({
+      email: normalizeEmail(email.value),
+      password: password.value,
+    });
+    if (authError) {
+      setError(authErrorMessage(authError));
+      setLoading(false);
+      inFlight.current = false;
+      return;
+    }
+    router.replace(next);
+    router.refresh();
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-3 p-6">
-      <h1 className="text-2xl font-semibold">Log in or sign up</h1>
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit("login");
-        }}
-      >
-        <input
-          className="rounded border px-3 py-2"
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          className="rounded border px-3 py-2"
-          type="password"
-          placeholder="Password (6+ characters)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <div className="flex gap-2">
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex-1 rounded bg-black px-4 py-2 text-white disabled:opacity-50 dark:bg-white dark:text-black"
-          >
-            Log in
-          </button>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => submit("signup")}
-            className="flex-1 rounded border px-4 py-2 disabled:opacity-50"
-          >
-            Sign up
-          </button>
+    <form noValidate onSubmit={onSubmit} className="flex flex-col gap-1" aria-describedby={error ? "login-error" : undefined}>
+      {notice && (
+        <Alert tone={notice.tone} className="mb-4">
+          {notice.text}
+        </Alert>
+      )}
+      <Field
+        label="Email"
+        type="email"
+        name="email"
+        autoComplete="email"
+        inputMode="email"
+        required
+        error={email.error}
+        {...email.inputProps}
+      />
+      <PasswordField
+        label="Password"
+        name="password"
+        id="login-password"
+        autoComplete="current-password"
+        required
+        error={password.error}
+        {...password.inputProps}
+      />
+      <div className="-mt-1 mb-4 flex justify-end">
+        <Link href={ROUTES.forgotPassword} className="text-sm text-accent underline-offset-4 hover:underline">
+          Forgot password?
+        </Link>
+      </div>
+      {error && (
+        <div id="login-error" className="mb-4">
+          <Alert tone="error">{error}</Alert>
         </div>
-      </form>
-      {message && <p className="text-sm text-red-600">{message}</p>}
-    </main>
+      )}
+      <Button type="submit" size="lg" loading={loading} className="w-full">
+        {loading ? "Logging in" : "Log in"}
+      </Button>
+    </form>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <AuthShell
+      title="Log in"
+      description="Use the email and password you signed up with."
+      footer={
+        <>
+          New here?{" "}
+          <Link href={ROUTES.signup} className="text-accent underline-offset-4 hover:underline">
+            Create an account
+          </Link>
+        </>
+      }
+    >
+      <Suspense>
+        <LoginForm />
+      </Suspense>
+    </AuthShell>
   );
 }

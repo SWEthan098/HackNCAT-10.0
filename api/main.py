@@ -1,45 +1,60 @@
+"""FastAPI entry point. Routes live in routers/, one module per feature.
+
+Run locally:  uvicorn main:app --reload --port 8000   (Swagger at /docs in development)
+"""
+
 import os
-from functools import lru_cache
 
 from dotenv import load_dotenv
 
-load_dotenv()  # reads api/.env locally; Railway injects env vars directly
+# Reads api/.env locally; Railway injects env vars directly. Tests set API_SKIP_DOTENV=1 so
+# a developer's real credentials are never loaded into the test process.
+if os.getenv("API_SKIP_DOTENV") != "1":
+    load_dotenv()
 
-from fastapi import Depends, FastAPI  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from supabase import Client, create_client  # noqa: E402
 
-from auth import current_user  # noqa: E402
+from core.config import get_settings  # noqa: E402
+from core.errors import install_error_handlers  # noqa: E402
+from core.request_log import RequestLogMiddleware, configure_logging  # noqa: E402
+from routers import ai, health, me  # noqa: E402
 
-app = FastAPI(title="api")
-
-origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+TAGS = [
+    {"name": "health", "description": "Liveness and readiness. No auth."},
+    {"name": "me", "description": "The signed-in user's identity and profile. Bearer auth."},
+    {"name": "ai", "description": "Provider-neutral AI endpoints. Bearer auth."},
+]
 
 
-@lru_cache
-def supabase_admin() -> Client:
-    """Service-role client. Bypasses RLS, so only use it server-side and scope queries yourself."""
-    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
+def create_app() -> FastAPI:
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    app = FastAPI(
+        title="HackNCAT API",
+        version="0.2.0",
+        description="Authenticate with `Authorization: Bearer <Supabase access token>`. "
+        'Errors always use `{"error": {"code", "message", "request_id"}}`.',
+        openapi_tags=TAGS,
+        docs_url="/docs" if settings.enable_docs else None,
+        redoc_url="/redoc" if settings.enable_docs else None,
+        openapi_url="/openapi.json" if settings.enable_docs else None,
+    )
+    app.add_middleware(RequestLogMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        # Auth uses a bearer header, not cookies, so credentials are not needed cross-origin.
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+        expose_headers=["X-Request-Id"],
+    )
+    install_error_handlers(app)
+    app.include_router(health.router)
+    app.include_router(me.router)
+    app.include_router(ai.router)
+    return app
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.get("/me")
-def me(user: dict = Depends(current_user)):
-    profile = None
-    try:
-        res = supabase_admin().table("profiles").select("*").eq("id", user["sub"]).maybe_single().execute()
-        profile = res.data if res else None
-    except Exception as e:  # missing env or migration not run yet; auth still worked
-        profile = {"error": str(e)}
-    return {"id": user["sub"], "email": user.get("email"), "role": user.get("role"), "profile": profile}
+app = create_app()

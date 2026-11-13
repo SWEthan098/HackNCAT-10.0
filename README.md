@@ -1,59 +1,87 @@
-# hackncat
+# HackNCAT 10.0
 
-> TODO: one-line description of what we're building.
+A competition-ready starter for HackNCAT 10.0. Accounts, a secure API, a swappable AI layer, a
+design system, tests and CI are already wired together, so the team can start on the Lenovo,
+Cisco or Medtronic challenge the moment it is announced.
 
-Monorepo starter: **Next.js** (Vercel) + **Supabase** (Auth, Postgres, Storage, Realtime) + **FastAPI** (Railway).
+> The product itself is not built yet. When the challenge arrives, follow
+> [HACKATHON_WORKFLOW.md](HACKATHON_WORKFLOW.md). The technical source of truth is
+> [PROJECT_SPEC.md](PROJECT_SPEC.md).
+
+## Tech stack
+
+| Layer | Choice | Hosted on |
+| --- | --- | --- |
+| Frontend | Next.js 16 (App Router, Cache Components, Turbopack), React 19, TypeScript, Tailwind CSS 4 | Vercel |
+| UI system | Own components in `web/src/components/ui`, built to the [Hallmark](docs/HALLMARK.md) design skill (Cobalt theme) | |
+| Auth | Supabase Auth with `@supabase/ssr` cookie sessions, server-side route protection in `src/proxy.ts` | Supabase |
+| Database | Supabase Postgres with Row Level Security, versioned SQL migrations | Supabase |
+| Backend | FastAPI (Python 3.13), feature routers, central errors, JWT verification via JWKS | Railway |
+| AI | Provider-neutral service: Groq (default), Anthropic Claude, offline mock | |
+| Tests | pytest (API), Playwright (unit + browser E2E against real Supabase) | GitHub Actions |
+| Research | [Agent-Reach](docs/AGENT_REACH.md) Claude Code skill | |
 
 ## Architecture
 
 ```
-Browser -> Vercel (Next.js, web/) -> Supabase (Auth, DB, Storage, Realtime)
-               |
-               +-- Bearer JWT -> Railway (FastAPI, api/) -> Supabase (service role)
+Browser ──> Next.js (web/, Vercel) ──> Supabase Auth + Postgres (RLS)
+   │            └─ proxy.ts: refreshes the session cookie, guards routes
+   │
+   └─ Authorization: Bearer <Supabase access token>
+                └──> FastAPI (api/, Railway) ──> Supabase (service role, scoped per user)
+                                         └──> AI provider (Groq / Anthropic / mock)
 ```
 
-- **Auth:** Supabase Auth only. The browser signs in with Supabase and gets a JWT.
-- **Simple CRUD:** the frontend queries Supabase directly. Row Level Security (RLS) protects every table.
-- **Heavy or secret work** (AI calls, background jobs, third-party APIs) goes in FastAPI. The frontend sends
-  `Authorization: Bearer <supabase access token>`. `api/auth.py` verifies it (HS256 via `SUPABASE_JWT_SECRET`,
-  or ES256/RS256 via the project's JWKS endpoint if the project uses asymmetric signing keys).
-  The API then talks to Supabase with the service role key.
+- **Simple CRUD** can go straight from the browser to Supabase; RLS protects every table.
+- **Secret or heavy work** (AI calls, third-party APIs, jobs) goes through FastAPI, which verifies the
+  user's token and holds all server-side keys.
 
 ```
-web/                      Next.js (TypeScript, Tailwind, App Router)
-  src/lib/supabase.ts     browser Supabase client
-  src/app/login/          login / signup
-  src/app/dashboard/      protected page; calls API /me
-api/                      FastAPI
-  main.py                 /health, /me, CORS
-  auth.py                 current_user dependency (JWT verification)
-supabase/migrations/      SQL schema, versioned in git
+web/
+  src/proxy.ts                  route protection + session refresh (Next 16 "proxy" = middleware)
+  src/app/                      pages: / login signup forgot-password reset-password auth/callback dashboard/*
+  src/components/ui/            design system (Button, Field, NavCard, Modal, Dropdown, Table, ...)
+  src/components/auth/          AuthProvider (session state + authenticated API client)
+  src/lib/                      supabase clients, API client, routes, validation
+  tests/unit, tests/e2e         Playwright tests
+api/
+  main.py                       app factory, middleware, routers
+  auth.py                       Supabase JWT verification (ES256 via JWKS, or HS256)
+  core/                         config, errors, request logging, database client
+  routers/                      health, me, ai (one module per feature)
+  schemas/                      Pydantic request/response models
+  services/ai/                  provider abstraction: base, groq, anthropic, mock, ai_service
+  tests/                        pytest (no network, no credentials)
+supabase/migrations/            SQL schema, applied in filename order
+challenge/                      templates for the challenge intake workflow
+docs/                           AUTH, AI, DEPLOYMENT, GITHUB, HALLMARK, AGENT_REACH
 ```
 
-## Run locally
+## Local development
 
-Prerequisites: Node 20+, Python 3.11+, a Supabase project (see Deploy step 1).
+Prerequisites: Node 20+ (24 used in CI), Python 3.11+ (3.13 used in CI), access to the team's
+Supabase project.
 
-The web app's public Supabase values are already committed in `web/.env`. Only the API needs a secret:
+**1. API secrets.** The web app's public Supabase values are committed in `web/.env`. Only the API needs
+secrets:
 
 ```bash
-cp .env.example api/.env   # keep only the api section
+cp .env.example api/.env
+# then set SUPABASE_SERVICE_ROLE_KEY (ask a teammate privately; never commit it)
+# optional: GROQ_API_KEY / ANTHROPIC_API_KEY, or AI_PROVIDER=mock to work offline
 ```
 
-Then set `SUPABASE_SERVICE_ROLE_KEY` in `api/.env` (Supabase -> Project Settings -> API Keys -> secret key).
-Ask a teammate for it privately; never commit it.
-
-**Terminal 1: API** (http://localhost:8000)
+**2. API** on http://localhost:8000 (Swagger at http://localhost:8000/docs):
 
 ```bash
 cd api
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
 uvicorn main:app --reload --port 8000
 ```
 
-**Terminal 2: web** (http://localhost:3000)
+**3. Web** on http://localhost:3000:
 
 ```bash
 cd web
@@ -61,34 +89,34 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000, sign up, then go to `/dashboard`. You should see your user id and profile returned
-from the API's `/me`, which proves the full chain works: browser -> Supabase Auth -> FastAPI -> Supabase.
+Open http://localhost:3000, create an account, and go to **System status** on the dashboard: every
+row should say Pass (the AI row says "Not configured" until a key is set).
 
-## Deploy
+## Testing
 
-1. **Supabase**
-   - Create a project.
-   - Run the migrations: paste each file in `supabase/migrations/` into the SQL Editor in order, or use the CLI
-     (`supabase link --project-ref <ref>` then `supabase db push`).
-   - Auth -> URL Configuration: set Site URL to your Vercel URL and add `http://localhost:3000` to redirect URLs.
-   - For faster hackathon testing you can disable "Confirm email" under Auth -> Providers -> Email.
-2. **Vercel** (frontend)
-   - Import the GitHub repo. Set **Root Directory = `web`**.
-   - Env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL` (Railway URL).
-3. **Railway** (API)
-   - New service from the GitHub repo. Set **Root Directory = `api`**.
-   - Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - Env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`,
-     `ALLOWED_ORIGINS` (your Vercel URL(s), comma-separated).
-   - Generate a public domain, then put it in Vercel's `NEXT_PUBLIC_API_URL` and redeploy the frontend.
+| What | Command | Needs |
+| --- | --- | --- |
+| API lint + format | `cd api && ruff check . && ruff format --check .` | |
+| API tests (31) | `cd api && pytest` | nothing (fake DB, local tokens, mock AI) |
+| Web lint | `cd web && npm run lint` | |
+| Web types | `cd web && npm run typecheck` | |
+| Web production build | `cd web && npm run build` | |
+| Web unit tests | `cd web && npm run test:unit` | |
+| Browser E2E (14) | `cd web && npm run test:e2e` | both dev servers running, `api/.env` with the service role key, Microsoft Edge locally (or `PW_CHANNEL=chrome`) |
 
-## Team workflow
+The E2E suite creates one uniquely named `e2e-…@example.com` user, runs the whole account lifecycle
+(sign-up, duplicate sign-up, login, refresh, new browser context, profile, logout, wrong password,
+open-redirect check, password recovery) and deletes that user, and only that user, at the end.
 
-- `main` is always deployable. Never push directly to it.
-- Branch per feature: `git checkout -b feat/<short-name>`.
-- Open a PR into `main`. Vercel posts a preview deploy on every PR. Test there, get one review, merge.
-- **One person per folder** to avoid merge conflicts, e.g. one on `web/` pages, one on `web/` components,
-  one on `api/`, one on `supabase/migrations/`. Coordinate before touching someone else's area.
-- Schema changes: add a **new** timestamped file in `supabase/migrations/`. Never edit a migration that has
-  already been applied.
-- Pull `main` often (`git pull --rebase origin main`) to keep conflicts small.
+## Deployment
+
+Vercel (web, root `web/`), Railway (API, root `api/`, config in `api/railway.json`) and Supabase.
+Step-by-step settings, environment variables and the Supabase redirect URLs are in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## More docs
+
+- [PROJECT_SPEC.md](PROJECT_SPEC.md): architecture, conventions, database, API, auth, AI
+- [HACKATHON_WORKFLOW.md](HACKATHON_WORKFLOW.md): from challenge prompt to shipped demo
+- [docs/AUTH.md](docs/AUTH.md) · [docs/AI.md](docs/AI.md) · [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) ·
+  [docs/GITHUB.md](docs/GITHUB.md) · [docs/HALLMARK.md](docs/HALLMARK.md) · [docs/AGENT_REACH.md](docs/AGENT_REACH.md)

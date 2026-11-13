@@ -1,55 +1,51 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { createClient } from "../../lib/supabase";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { PageHeader } from "@/components/layout/AppShell";
+import { IconBook, IconKey, IconPulse, IconSpark, IconUser, NavCard, NavCardGrid } from "@/components/ui";
+import { API_URL } from "@/lib/api";
+import { ROUTES } from "@/lib/routes";
 
-// Protected page: redirects to /login without a session, then calls the
-// FastAPI /me endpoint with the user's JWT to prove web -> api -> Supabase works.
+// The signature object of this starter: route cards that go to working screens.
+// When the challenge arrives, add a card per feature here (and to NAV_ITEMS in AppShell).
 export default function DashboardPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState<string | null>(null);
-  const [apiResult, setApiResult] = useState<string>("Loading...");
-
-  useEffect(() => {
-    const supabase = createClient();
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      const session = data.session;
-      if (!session) return router.replace("/login");
-      setEmail(session.user.email ?? null);
-
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/me`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-        setApiResult(`${res.status} ${JSON.stringify(await res.json(), null, 2)}`);
-      } catch (e) {
-        setApiResult(`API unreachable: ${String(e)}`);
-      }
-    })();
-  }, [router]);
-
-  async function logout() {
-    await createClient().auth.signOut();
-    router.replace("/login");
-  }
-
-  if (!email) return <main className="p-6">Loading...</main>;
-
+  const { user } = useAuth();
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <button onClick={logout} className="rounded border px-3 py-1 text-sm">
-          Log out
-        </button>
-      </div>
-      <p>
-        Signed in as <strong>{email}</strong>
-      </p>
-      <h2 className="font-medium">GET {process.env.NEXT_PUBLIC_API_URL}/me</h2>
-      <pre className="overflow-x-auto rounded bg-zinc-100 p-3 text-sm dark:bg-zinc-900">{apiResult}</pre>
-    </main>
+    <>
+      <PageHeader title="Overview" description={user?.email ? `Signed in as ${user.email}.` : undefined} />
+      <NavCardGrid>
+        <NavCard
+          href={ROUTES.profile}
+          icon={<IconUser />}
+          title="Profile"
+          description="Your account details and display name, stored in the profiles table."
+        />
+        <NavCard
+          href={ROUTES.system}
+          icon={<IconPulse />}
+          title="System status"
+          description="Live checks of the API, database, your session and the AI provider."
+        />
+        <NavCard
+          href={ROUTES.ai}
+          icon={<IconSpark />}
+          title="AI playground"
+          description="Send a prompt through the backend's provider-neutral AI service."
+        />
+        <NavCard
+          href={ROUTES.resetPassword}
+          icon={<IconKey />}
+          title="Change password"
+          description="Choose a new password for this account."
+        />
+        <NavCard
+          href={`${API_URL}/docs`}
+          external
+          icon={<IconBook />}
+          title="API docs"
+          description="Interactive Swagger docs for the FastAPI backend (development only)."
+        />
+      </NavCardGrid>
+    </>
   );
 }

@@ -26,3 +26,14 @@ venv/
 
 # Local AI assistant notes (kept off GitHub)
 CLAUDE.md
+
+# Test / tool output
+.pytest_cache/
+.ruff_cache/
+playwright-report/
+test-results/
+blob-report/
+coverage/
+# Hallmark per-project run state (preflight cache, build log)
+.hallmark/
+*.log

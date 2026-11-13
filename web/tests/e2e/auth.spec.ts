@@ -123,11 +123,17 @@ test("dashboard nav cards route to working pages, profile matches the user", asy
   const authRow = page.getByRole("row", { name: /Session verified by API/ });
   await expect(authRow).toContainText("Pass");
   await expect(page.getByRole("row", { name: /Database/ })).toContainText("Pass");
+  await expect(page.getByRole("row", { name: /AI provider/ })).toContainText("Pass");
 
   await page.goto("/dashboard");
   await page.getByRole("link", { name: /AI playground/ }).click();
   await expect(page).toHaveURL(/\/dashboard\/ai$/);
   await expect(page.getByRole("heading", { name: "AI playground" })).toBeVisible();
+  // Full path: browser -> API -> configured AI provider (Groq locally, mock in CI).
+  await page.getByLabel("Message").fill("Reply with exactly: HackNCAT ready");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByTestId("ai-output")).toContainText("HackNCAT ready", { timeout: 45_000 });
+  await expect(page.getByText("Input tokens")).toBeVisible();
 });
 
 test("signed-in users are sent from /login to the dashboard; logout ends the session", async ({ page }) => {

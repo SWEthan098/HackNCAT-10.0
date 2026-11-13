@@ -1,7 +1,9 @@
 """Groq adapter (official `groq` SDK, OpenAI-style chat completions).
 
-Default model is a placeholder that must be checked against https://console.groq.com/docs/models
-before relying on it; set AI_MODEL to pin the model you actually chose.
+Default model verified live on 2026-11-13 against the team's key (GET /openai/v1/models + a chat
+call). Chat models available then: openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.8-27b.
+gpt-oss models spend output tokens on reasoning, so keep AI_MAX_OUTPUT_TOKENS comfortably above
+the answer length. Set AI_MODEL to pick another.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from services.ai.base import AIProvider, AIProviderError, AIRequest, Usage
 
 class GroqProvider(AIProvider):
     name = "groq"
-    default_model = "llama-3.3-70b-versatile"
+    default_model = "openai/gpt-oss-120b"
 
     def __init__(self, settings: Settings):
         self._settings = settings

@@ -18,7 +18,7 @@ api/services/ai/
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `AI_PROVIDER` | `groq` | `groq`, `anthropic` or `mock` |
-| `AI_MODEL` | provider default | Groq: `llama-3.3-70b-versatile` (placeholder, confirm it is still served at console.groq.com/docs/models). Anthropic: `claude-opus-5-5`. |
+| `AI_MODEL` | provider default | Groq: `openai/gpt-oss-120b` (also available: `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`). Anthropic: `claude-opus-5-5`. |
 | `GROQ_API_KEY` / `ANTHROPIC_API_KEY` | empty | Only the selected provider's key is needed |
 | `ANTHROPIC_EFFORT` | `medium` | Claude thinking effort: `low`, `medium`, `high`, `xhigh`, `max` |
 | `AI_TIMEOUT_SECONDS` | `30` | Per-request timeout (SDK) |
@@ -86,6 +86,9 @@ with `tools` or `response_schema`) and implement it in each adapter. Keep featur
 ## Verification status
 
 - 2026-11-13: provider selection, error mapping, cost estimates and the `/ai/chat` endpoint are
-  covered by pytest with the mock provider. Both real adapters import and fail cleanly without keys.
-  **No live call to Groq or Anthropic has been made yet**: no API keys were available. After adding
-  a key, check it from the AI playground page.
+  covered by pytest with the mock provider.
+- 2026-11-13: **Groq verified live** with the team key. The key lists 11 models; live chat calls
+  succeeded on `openai/gpt-oss-120b` (~1.5 s), `openai/gpt-oss-20b` (~0.6 s) and `qwen/qwen3.8-27b`
+  (~0.5 s). `llama-3.3-70b-versatile` is not available to this key. Re-list models with
+  `GET https://api.groq.com/openai/v1/models` when choosing for the challenge.
+- Anthropic: not verified live (no key).

@@ -36,7 +36,12 @@ git push -u origin feature/12-upload-readings
 
 ### Recommended `main` protection
 
-Settings -> Branches -> Add rule for `main`:
+**Not active yet.** GitHub only offers branch protection (and rulesets) on private repositories
+with GitHub Pro/Team; the API returned "Upgrade to GitHub Pro or make this repository public"
+on 2026-11-13. Until then the rule is a team agreement: no direct pushes to `main`, everything
+through a pull request with green CI. GitHub Pro is free through the GitHub Student Developer Pack.
+
+Once available, Settings -> Branches -> Add rule for `main`:
 
 - Require a pull request before merging (1 approval).
 - Require status checks to pass: **Web (lint, types, build, unit tests)** and **API (lint, tests)**.

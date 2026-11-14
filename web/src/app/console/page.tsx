@@ -7,7 +7,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { Disclaimer } from "@/components/kairos/Disclaimer";
 import { PageHeader } from "@/components/layout/AppShell";
 import { ErrorState, LoadingState } from "@/components/ui";
 import { ApiError } from "@/lib/api";
@@ -26,7 +25,7 @@ export default function ConsolePage() {
 
   return (
     <>
-      <PageHeader title="Kairos Defender Console" description="Incidents, sorted by risk." />
+      <PageHeader title="Incidents" />
       {error ? (
         <ErrorState title="Couldn't load incidents" message={error} />
       ) : !incidents ? (
@@ -45,7 +44,6 @@ export default function ConsolePage() {
           ))}
         </ul>
       )}
-      <Disclaimer />
     </>
   );
 }

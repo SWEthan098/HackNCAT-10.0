@@ -18,11 +18,14 @@ export function Dropdown({
   triggerLabel,
   items,
   align = "end",
+  tone = "paper",
 }: {
   trigger: ReactNode;
   triggerLabel: string;
   items: DropdownItem[];
   align?: "start" | "end";
+  /** The surface the trigger sits on. The menu itself is always paper. */
+  tone?: "paper" | "graphite";
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -91,7 +94,12 @@ export function Dropdown({
             setOpen(true);
           }
         }}
-        className="flex h-9 items-center gap-2 rounded-input px-2 text-sm text-ink-2 transition-colors hover:bg-paper-2 hover:text-ink"
+        className={cn(
+          "flex h-9 items-center gap-2 rounded-input px-2 text-sm transition-colors",
+          tone === "graphite"
+            ? "text-graphite-muted hover:bg-graphite-2 hover:text-graphite-ink"
+            : "text-ink-2 hover:bg-paper-2 hover:text-ink",
+        )}
       >
         {trigger}
       </button>
@@ -102,7 +110,7 @@ export function Dropdown({
           aria-label={triggerLabel}
           onKeyDown={onMenuKey}
           className={cn(
-            "absolute top-full z-[100] mt-1 min-w-56 rounded-card border border-rule bg-paper p-1 shadow-card",
+            "on-paper absolute top-full z-[100] mt-1 min-w-56 rounded-card border border-rule bg-paper p-1 shadow-card",
             align === "end" ? "right-0" : "left-0",
           )}
         >

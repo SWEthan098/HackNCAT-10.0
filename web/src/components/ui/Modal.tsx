@@ -35,7 +35,7 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className="modal w-[min(32rem,calc(100vw-2rem))] rounded-card border border-rule bg-paper p-0 text-ink shadow-card"
+      className="modal on-paper w-[min(32rem,calc(100vw-2rem))] rounded-card border border-rule bg-paper p-0 shadow-card"
       aria-labelledby="modal-title"
       onClose={onClose}
       onCancel={(e) => {

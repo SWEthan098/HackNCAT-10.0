@@ -108,3 +108,15 @@ export const IconExternal = (p: IconProps) => (
     <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
   </Icon>
 );
+export const IconPower = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3v9" />
+    <path d="M6.3 6.8a8 8 0 1 0 11.4 0" />
+  </Icon>
+);
+export const IconSnow = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 2.5v19M3.8 7.25l16.4 9.5M3.8 16.75l16.4-9.5" />
+    <path d="m9.5 4.5 2.5 2.5 2.5-2.5M9.5 19.5l2.5-2.5 2.5 2.5" />
+  </Icon>
+);

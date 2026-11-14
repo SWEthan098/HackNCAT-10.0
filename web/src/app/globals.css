@@ -2,6 +2,7 @@
  * nav: top bar, wordmark + section links + account menu · signature: the route cards on /dashboard · states: loading, empty, error, full
  * axes: light/grotesk-sans/cool · posture: restrained · contrast: pass · v2.0.0 */
 /* Hallmark · pre-emit critique: P_ H_ E_ S_ R_ V_ · weakest: E, the starter has no real data yet; every region ships its loading, empty and error states instead */
+/* Hallmark · console shell (/console): graphite top bar, wordmark + section tabs + kill switch key + account menu · footer: one-line disclaimer bar · states: armed, confirming, freezing, frozen, failed */
 @import "tailwindcss";
 @import "./tokens.css";
 @import "./base.css";
@@ -11,6 +12,9 @@
   --font-display: var(--font-familjen), system-ui, sans-serif;
   --font-body: var(--font-plex), system-ui, sans-serif;
   --font-outlier: var(--font-jetbrains), ui-monospace, monospace;
+  /* The danger key (kill switch, destructive confirms) gets its own bottom edge, like the cobalt key. */
+  --color-error-edge: oklch(40% 0.16 27);
+  --shadow-key-danger: 0 3px 0 0 var(--color-error-edge), 0 6px 8px -4px oklch(30% 0.12 27 / 0.45), inset 0 1px 0 oklch(100% 0 0 / 0.22);
 }
 
 /* Expose the Hallmark tokens as Tailwind utilities (bg-paper, text-ink, border-rule, ...).
@@ -25,6 +29,7 @@
   --color-rule: var(--color-rule);
   --color-rule-2: var(--color-rule-2);
   --color-accent: var(--color-accent);
+  --color-accent-2: var(--color-accent-2);
   --color-accent-deep: var(--color-accent-deep);
   --color-accent-wash: var(--color-accent-wash);
   --color-accent-ink: var(--color-accent-ink);
@@ -55,6 +60,21 @@
 }
 .key-accent {
   box-shadow: var(--shadow-key-accent);
+}
+.key-danger {
+  box-shadow: var(--shadow-key-danger);
+}
+
+/* A surface sets its ink and its focus ring in the same rule, so text and rings keep their
+ * contrast when a paper popover or dialog sits inside a graphite bar (and the other way round). */
+.on-graphite {
+  background: var(--color-graphite);
+  color: var(--color-graphite-ink);
+  --color-focus: var(--color-accent-2);
+}
+.on-paper {
+  color: var(--color-ink);
+  --color-focus: var(--color-accent);
 }
 @media (hover: hover) {
   .key:not(:disabled):not([aria-disabled="true"]):hover {

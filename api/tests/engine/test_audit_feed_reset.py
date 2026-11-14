@@ -71,11 +71,20 @@ def test_public_feed_never_carries_the_attackers_message(fake_db):
     )
     assert feed["nickname"] == "agent-falcon" and feed["verdict"] == "blocked" and feed["layers_reached"] == 3
     assert feed["summary"] == "agent-falcon tried trick_ai and was blocked (AML.T0051.000)."
+    assert feed["breach"] is False  # layers_reached=3 is not a breach
     public = str(rows(fake_db, "public_feed"))
     assert "payroll" not in public and "evil" not in public and "<" not in public
     assert rows(fake_db, "attempts")[0]["message"] == message  # team-only copy keeps it
     with pytest.raises(ValueError):
         publish_attempt(fake_db, nickname="x", attack_type="y", verdict="won")
+
+
+def test_public_feed_copies_breach_from_the_attempt(fake_db):
+    publish_attempt(fake_db, nickname="a", attack_type="trick_ai", verdict="blocked", layers_reached=5)
+    publish_attempt(fake_db, nickname="b", attack_type="trick_ai", verdict="allowed", breach=True)
+    feed = rows(fake_db, "public_feed")
+    assert [r["breach"] for r in feed] == [False, True]
+    assert [r["breach"] for r in feed] == [r["breach"] for r in rows(fake_db, "attempts")]
 
 
 def test_raw_login_data_is_deleted_after_24h_but_scores_stay(fake_db):

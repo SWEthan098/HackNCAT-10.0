@@ -90,6 +90,7 @@ def publish_attempt(
         "verdict": verdict,
         "layers_reached": layers,
         "technique": tech,
+        "breach": bool(breach),  # the counter reads this; never guess breaches from layers
         "summary": sanitize_text(summary, 200),
     }
     return db.table("public_feed").insert(row).execute().data[0]

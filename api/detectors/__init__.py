@@ -1,26 +1,28 @@
 """AI detectors. OWNER: Miles (P2).
 
-Every detector returns schemas.kairos.Detection. These are STUBS so P1 and P3 can import them
-today; replace the bodies with real logic. Fail closed: if the model output can't be parsed,
-return flagged=True. Uses services.ai (provider-neutral) for model calls.
+Every detector returns schemas.kairos.Detection. scan_injection (detectors/injection.py),
+score_login (detectors/login.py) and classify_message (detectors/comms.py) are real; check_intent
+is still a STUB so P1 and P3 can import it today. Fail closed: if the model output can't be parsed, return
+flagged=True. Uses services.ai (provider-neutral) for model calls.
 """
 
 from __future__ import annotations
 
+from detectors.comms import classify_message, classify_message_mock
+from detectors.injection import mitre_keys, scan_injection, scan_injection_mock
+from detectors.login import score_login
 from schemas.kairos import Detection
 
-
-async def scan_injection(text: str) -> Detection:
-    return Detection(flagged=False, confidence=0.0, technique=None, explanation="stub: scanner not built yet")
+__all__ = [
+    "check_intent",
+    "classify_message",
+    "classify_message_mock",
+    "mitre_keys",
+    "scan_injection",
+    "scan_injection_mock",
+    "score_login",
+]
 
 
 async def check_intent(user_request: str, proposed_action: dict) -> Detection:
     return Detection(flagged=False, confidence=0.0, technique=None, explanation="stub: intent check not built yet")
-
-
-async def classify_message(message: str) -> Detection:
-    return Detection(flagged=False, confidence=0.0, technique=None, explanation="stub: classifier not built yet")
-
-
-def score_login(features: dict) -> Detection:
-    return Detection(flagged=False, confidence=0.0, technique=None, explanation="stub: login scoring not built yet")

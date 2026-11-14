@@ -123,6 +123,8 @@ class LLMPlanner:
             except AIProviderError as e:
                 if e.kind == "bad_request" and attempt == 0:
                     continue
+                if e.kind == "refused":  # the model said no: an honest answer, not an outage
+                    return {"final": "I can't help with that request."}
                 raise AgentOffline(e.kind) from e
             if "{" in text:  # looks like the JSON protocol; prose gets one nudge
                 break

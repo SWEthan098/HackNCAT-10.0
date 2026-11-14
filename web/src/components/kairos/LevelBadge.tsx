@@ -13,8 +13,21 @@ const LEVEL_CLASSES: Record<Level, string> = {
 
 const LEVEL_LABELS: Record<Level, string> = { low: "Low", medium: "Medium", high: "High", critical: "Critical" };
 
-/** "Critical 85" chip. Pass `risk` wherever the score is known. */
-export function LevelBadge({ level, risk, className }: { level: Level; risk?: number; className?: string }) {
+/**
+ * "Critical 85" chip. Pass `risk` wherever the score is known. With `children` the badge
+ * shows "Critical <children>" instead (e.g. a count in the KPI strip).
+ */
+export function LevelBadge({
+  level,
+  risk,
+  className,
+  children,
+}: {
+  level: Level;
+  risk?: number;
+  className?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <span
       className={cn(
@@ -25,6 +38,7 @@ export function LevelBadge({ level, risk, className }: { level: Level; risk?: nu
     >
       {LEVEL_LABELS[level]}
       {typeof risk === "number" && <span className="num">{risk}</span>}
+      {children !== undefined && <span className="num">{children}</span>}
     </span>
   );
 }

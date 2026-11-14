@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agents.victim.tools import ToolResult
-from firewall import scoring
+from firewall import dlp, scoring
 from firewall.integrations import EntityStateReader, record
 from firewall.policy import AgentPolicy, PolicyError, get_policy
 from firewall.scope import Scope, derive_scope
@@ -203,7 +203,28 @@ class Firewall:
                 risk=scoring.BLOCKED_HIJACK,
                 extra=exfil,
             )
+        kinds = dlp.scan(body, ctx.dlp_profile)
+        if kinds:
+            return self._block(
+                "send_email",
+                "leak_protection",
+                f"This email contains protected data ({', '.join(kinds)}), so it was not sent.",
+                risk=scoring.SENSITIVE_DATA_BLOCKED,
+                extra=("llm_data_leakage",),
+            )
+        if dlp.has_foreign_links(body, policy.send_email.allowed_domains):
+            return self._block(
+                "send_email",
+                "leak_protection",
+                "This email links to a site outside cisco.example, which could carry data out.",
+                risk=scoring.BLOCKED_HIJACK if self._hijack() else scoring.POLICY_VIOLATION,
+                extra=("llm_data_leakage",),
+            )
         return None
+
+    def _allowed_link_domains(self) -> list[str]:
+        policy = self.ctx.policy
+        return list(policy.send_email.allowed_domains) if policy and policy.send_email else ["cisco.example"]
 
     def _allow(self, tool: str) -> Decision:
         sensitive = self.ctx.policy is not None and self.ctx.policy.is_sensitive(tool)
@@ -215,7 +236,9 @@ class Firewall:
             return result.content
         self.ctx.untrusted_seen = True
         self.ctx.taint.add(result.origin, result.content, result.labels)
-        return f"<<UNTRUSTED {result.origin}>>\n{result.content}\n<<END UNTRUSTED>>"
+        # The model never needs SSNs, keys or card numbers: strip them before it sees the data.
+        content = dlp.redact(result.content, dlp.INTERNAL).text
+        return f"<<UNTRUSTED {result.origin}>>\n{content}\n<<END UNTRUSTED>>"
 
     async def filter_output(self, text: str) -> str:
         if canary_hit(text):
@@ -230,4 +253,26 @@ class Firewall:
                 mitre=self._attack_tags("llm_data_leakage"),
             )
             return "I can't share that. (Kairos withheld this reply because it contained protected data.)"
+        cleaned = dlp.redact(text, self.ctx.dlp_profile)
+        text, links = dlp.strip_links(cleaned.text, self._allowed_link_domains())
+        if cleaned.found:
+            outsider = self.ctx.dlp_profile == dlp.PUBLIC
+            self._decide(
+                "reply",
+                "blocked",
+                "leak_protection",
+                f"Protected data was removed from the reply ({', '.join(cleaned.kinds)}).",
+                scoring.SENSITIVE_DATA_BLOCKED if outsider else scoring.DLP_REDACTED_INTERNAL,
+                action="output_redacted:dlp",
+                mitre=self._attack_tags("llm_data_leakage") if outsider else [],
+            )
+        if links:
+            self._decide(
+                "reply",
+                "flagged",
+                "leak_protection",
+                f"Removed {links} link(s) or image(s) pointing outside cisco.example.",
+                scoring.LINKS_STRIPPED,
+                action="output_sanitized:links",
+            )
         return text

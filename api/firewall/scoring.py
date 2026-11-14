@@ -13,6 +13,8 @@ BLOCKED_HIJACK = 55  # untrusted input drove a sensitive action and it was block
 SENSITIVE_DATA_BLOCKED = 70  # payroll/secrets caught in a tool argument on the way out
 LEAK_OR_CANARY = 100  # canary seen anywhere, or data actually left: automatically Critical
 FROZEN_AGENT = 30  # containment doing its job
+DLP_REDACTED_INTERNAL = 15  # a colleague's reply had an SSN/key stripped
+LINKS_STRIPPED = 20
 SCANNER_FAILURE = 60  # fail closed: unsure means a human looks
 
 

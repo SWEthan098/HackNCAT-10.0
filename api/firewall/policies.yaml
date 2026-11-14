@@ -1,8 +1,24 @@
 # What each AI agent is allowed to do. OWNER: Ethan (P1). Shown on a pitch slide.
+# "Our policy is public, and you still can't break it."
+#
+# tools:            the only tools this agent can ever call (least privilege)
+# sensitive_tools:  tools that change something outside the agent; a task only gets them when
+#                   the human's request explicitly asks for that action (scoped permissions)
+# requires_approval_at_level: risk level (low|medium|high|critical) at which an otherwise-allowed
+#                   action is held for a human instead of running
+
 finance_agent:
+  description: Cisco finance team's email assistant (the agent attackers try to hijack)
   tools: [read_email, read_file, send_email]
+  sensitive_tools: [send_email]
+  requires_approval_at_level: high
   send_email:
     allowed_domains: [cisco.example]
-    requires_approval_at_level: high
   read_file:
     allowed_paths: [/shared/finance/]
+
+security_analyst:
+  description: Kairos AI security analyst (read-only; recommends, never acts)
+  tools: [query_events, get_incident, get_entity_history, propose_response]
+  sensitive_tools: [propose_response]
+  requires_approval_at_level: high

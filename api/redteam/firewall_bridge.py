@@ -5,10 +5,9 @@ email, tries to send payroll outside, and the firewall blocks it and records the
 
     outcome = await run_stage3("protected", db)
 
-With a database, this runs Ethan's real agent + firewall (agents.victim.runner.run_agent) as
-j.smith with source = scripted. The agent uses the real model, or Ethan's deterministic planner
-in DEMO_MODE / on the mock provider. If the model cannot be reached, the run is repeated with
-the deterministic planner so the chain still finishes; the result says so.
+With a database, this runs Ethan's agent + firewall (agents.victim.runner.run_agent) as j.smith
+with source = scripted. The agent is always his deterministic "gullible" planner, so it falls
+for the poisoned email on every run; the firewall that stops it is the real one.
 
 Without a database (offline scripts, unit tests) nothing may touch the network, so a small
 scripted stand-in applies the same hard rules and reports the one blocked event at risk 55.
@@ -16,7 +15,6 @@ scripted stand-in applies the same hard rules and reports the one blocked event 
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -32,7 +30,6 @@ FIREWALL_READY = True
 
 BLOCKED_HIJACK_RISK = 55  # plan section 5.13: blocked hijack, nothing leaked
 USER_TASK = "Summarize my inbox"  # a read-only task: it never grants send_email
-logger = logging.getLogger("api.redteam")
 
 
 @dataclass(frozen=True)
@@ -51,7 +48,7 @@ class Stage3Outcome:
     blocked: bool  # the agent tried to act and was stopped
     leaked: bool  # data left the company
     events: list[Event]
-    via: str  # "firewall", "firewall (scripted agent: model offline)" or "scripted"
+    via: str  # "firewall" (Ethan's real one) or "scripted" (the offline stand-in)
 
     @property
     def event(self) -> Event | None:
@@ -120,28 +117,26 @@ def _scripted(mode: str, db: Any = None) -> Stage3Outcome:
 
 
 async def _real_firewall(mode: str, db: Any) -> Stage3Outcome:
-    from agents.victim.planner import AgentOffline, GulliblePlanner
+    from agents.victim.planner import GulliblePlanner
     from agents.victim.runner import run_agent
     from firewall.integrations import EntityStateReader
-    from services.ai import get_ai_service
 
-    common: dict[str, Any] = {
-        "mode": mode,
-        "actor": TAKEOVER_USERNAME,
-        "owner": TAKEOVER_USERNAME,
-        "source": "scripted",
-        "state": EntityStateReader(db),
-        "db": db,
-    }
+    # The scripted chain always uses Ethan's deterministic "gullible" agent. The point of stage 3 is
+    # "assume the AI WILL get fooled": a live model sometimes ignores the poisoned email, and then
+    # there is nothing to block, the incident stops short of Critical and Unprotected does not leak.
+    # The firewall, its hard rules and the events are real; only the agent's choices are scripted.
+    # (The audience /attack path still uses the real model.)
+    outcome = await run_agent(
+        USER_TASK,
+        planner=GulliblePlanner(),
+        mode=mode,
+        actor=TAKEOVER_USERNAME,
+        owner=TAKEOVER_USERNAME,
+        source="scripted",
+        state=EntityStateReader(db),
+        db=db,
+    )
     via = "firewall"
-    try:
-        outcome = await run_agent(USER_TASK, ai=get_ai_service(), **common)
-    except AgentOffline:
-        # The model is unreachable. The hard rules do not need it, so finish the scripted chain
-        # with the deterministic planner instead of failing the demo.
-        logger.warning("stage 3: model offline, using the deterministic agent planner")
-        outcome = await run_agent(USER_TASK, planner=GulliblePlanner(), **common)
-        via = "firewall (scripted agent: model offline)"
 
     # The verdict comes from the firewall's decisions, not from whether its events were saved.
     events: list[Event] = list(outcome.firewall.ctx.events) if outcome.firewall is not None else []

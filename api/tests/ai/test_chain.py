@@ -147,22 +147,23 @@ def test_stage_three_uses_the_stand_in_offline_and_the_real_firewall_with_a_data
     assert leak.leaked and not leak.blocked
 
 
-def test_stage_three_finishes_with_the_scripted_agent_when_the_model_is_offline(fake_db, monkeypatch):
+def test_stage_three_never_depends_on_a_live_model(fake_db, monkeypatch):
+    """A live model sometimes ignores the poisoned email; the scripted chain must not vary."""
     from agents.victim import runner
-    from agents.victim.planner import AgentOffline
+    from agents.victim.planner import GulliblePlanner
 
-    real_run, calls = runner.run_agent, []
+    real_run, planners = runner.run_agent, []
 
-    async def flaky(task, **kw):
-        calls.append("planner" in kw)
-        if "planner" not in kw:
-            raise AgentOffline("timeout")
+    async def spy(task, **kw):
+        planners.append(kw.get("planner"))
+        assert "ai" not in kw  # no model is handed to the agent
         return await real_run(task, **kw)
 
-    monkeypatch.setattr(runner, "run_agent", flaky)
-    outcome = asyncio.run(firewall_bridge.run_stage3("protected", fake_db))
-    assert calls == [False, True] and outcome.blocked
-    assert outcome.via == "firewall (scripted agent: model offline)"
+    monkeypatch.setattr(runner, "run_agent", spy)
+    for mode, expected in (("protected", "blocked"), ("unprotected", "leaked")):
+        outcome = asyncio.run(firewall_bridge.run_stage3(mode, fake_db))
+        assert (outcome.blocked, outcome.leaked) == (expected == "blocked", expected == "leaked")
+    assert len(planners) == 2 and all(isinstance(p, GulliblePlanner) for p in planners)
 
 
 def test_attacker_log_names_the_email_that_actually_runs(fake_db):

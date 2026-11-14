@@ -28,10 +28,12 @@ from analyst.data import AnalystData
 from core.config import get_settings
 from firewall.core import Firewall
 from firewall.integrations import EntityStateReader
+from firewall.policy import load_policies
 from schemas.mitre import MITRE, TACTIC_ORDER
 from services.ai.base import AIProviderError, ChatMessage
 
 AGENT = "security_analyst"
+ANALYST_MAX_TOKENS = 4000
 logger = logging.getLogger("api.analyst")
 ACTIONS = {"lock_account": "lock the account", "revoke_sessions": "revoke sessions", "freeze_agent": "freeze the agent"}
 _INCIDENT_ID = re.compile(r"\b(inc-[\w-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b", re.I)
@@ -80,6 +82,8 @@ Rules:
 - Refer to events ONLY by their labels (E1, E2, E3, ... from EVENT LABELS). Never write the long event IDs.
 - Don't write MITRE IDs, a triage line or an evidence list: Kairos adds those itself.
 - You can't change anything. You may recommend ONE containment action for a human to approve.
+- freeze_agent is only for an AI agent such as finance_agent. Actors named judge:<name> are audience
+  attackers on the sandbox, and bot:<ip> are attacking machines: never call them agents.
 
 Write the answer in AT MOST 90 words of plain text (no markdown, no links), as exactly three
 sections separated by blank lines:
@@ -184,6 +188,8 @@ async def ask(
     if use_model:
         reply = await _model_reply(ai, question, context_blocks, ordered, labels)
     else:
+        reply = None
+    if reply is None:  # demo/mock, or the model's reply was unusable: code writes the summary instead
         reply = _template_reply(question, incident, ordered, labels)
 
     cited = [by_label.get(str(c).strip(), str(c).strip()) for c in reply.get("citations") or []]
@@ -276,7 +282,9 @@ async def _gather(question: str, data: AnalystData, fw: Firewall) -> tuple[dict 
     return incident, list(events.values()), blocks
 
 
-async def _model_reply(ai, question: str, blocks: list[str], ordered: list[dict], labels: dict[str, str]) -> dict:
+async def _model_reply(
+    ai, question: str, blocks: list[str], ordered: list[dict], labels: dict[str, str]
+) -> dict | None:
     legend = "\n".join(
         f"{labels[str(e.get('id'))]} = event {e.get('id')} "
         f"({e.get('sensor')}, {e.get('verdict')}, risk {e.get('risk')})"
@@ -289,18 +297,26 @@ async def _model_reply(ai, question: str, blocks: list[str], ordered: list[dict]
             f"\n\nQUESTION from the SOC analyst:\n{question}",
         )
     ]
-    kw: dict[str, Any] = {"system": SYSTEM_PROMPT, "max_output_tokens": 1200}
+    # Claude thinks before it answers and that counts against this cap: 1200 left Haiku with nothing
+    # to say on busy incidents. The 90-word limit in the prompt keeps the visible answer short.
+    kw: dict[str, Any] = {"system": SYSTEM_PROMPT, "max_output_tokens": ANALYST_MAX_TOKENS}
     model = agent_model(ai)
     if model:
         kw["model"] = model
     try:
         resp = await asyncio.to_thread(ai.chat, msgs, **kw)
     except AIProviderError:
-        return {"answer": "The AI analyst is offline right now; here is what the data shows.", "citations": []}
+        logger.warning("analyst: model unavailable, using the code-built summary")
+        return None
+    if resp.stop_reason == "max_tokens":
+        logger.warning(
+            "analyst: reply hit the token cap (%s tokens), using the code-built summary", resp.usage.output_tokens
+        )
+        return None
     return _parse(resp.text)
 
 
-def _parse(text: str) -> dict:
+def _parse(text: str) -> dict | None:
     decoder = json.JSONDecoder()
     for i, ch in enumerate(text):
         if ch == "{":
@@ -308,9 +324,9 @@ def _parse(text: str) -> dict:
                 obj, _ = decoder.raw_decode(text[i:])
             except json.JSONDecodeError:
                 continue
-            if isinstance(obj, dict) and isinstance(obj.get("answer"), str):
+            if isinstance(obj, dict) and isinstance(obj.get("answer"), str) and obj["answer"].strip():
                 return obj
-    return {"answer": text.strip(), "citations": []}
+    return None  # no JSON object with an "answer": unusable
 
 
 def _template_reply(question: str, incident, ordered: list[dict], labels: dict[str, str]) -> dict:
@@ -350,6 +366,8 @@ async def _maybe_propose(
     action, entity = str(propose.get("action", "")), str(propose.get("entity", ""))
     entities = {str(e.get(k)) for e in events for k in ("actor", "target")}
     if action not in ACTIONS or entity not in entities:  # only real entities, only known actions
+        return None
+    if action == "freeze_agent" and entity not in load_policies():  # only an AI agent can be frozen
         return None
     decision = await fw.before_tool("propose_response", {"action": action, "entity": entity})
     if decision.verdict != "allowed":

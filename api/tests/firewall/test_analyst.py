@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 import engine
 from analyst.data import DEMO_EVENTS, AnalystData
 from analyst.service import ask, summarize_incident, triage
@@ -129,3 +131,58 @@ def test_model_citations_may_use_labels(monkeypatch):
 
     r = asyncio.run(ask("Summarize inc-demo", data=AnalystData(None, demo=True), ai=Live(), state=StaticEntityState()))
     assert r.citations == ["evt-1", "evt-3"] and "Evidence: E1, E3" in r.answer
+
+
+@pytest.mark.parametrize(
+    "text,stop",
+    [
+        ("", "max_tokens"),  # thinking used the whole budget: nothing visible came back
+        ('{"answer": "What happened:\n1. Bot', "max_tokens"),  # cut off mid-JSON
+        ("", "end_turn"),  # empty reply
+        ('{"answer": "", "citations": []}', "end_turn"),  # JSON with an empty answer
+        ("I think this is fine.", "end_turn"),  # prose, not the JSON protocol
+    ],
+)
+def test_unusable_model_reply_falls_back_to_code_summary(text, stop):
+    from services.ai.base import AIResponse, Usage
+
+    class Flaky:
+        provider = type("P", (), {"name": "anthropic"})()
+
+        def chat(self, *_a, **_k):
+            return AIResponse(text=text, provider="anthropic", model="m", stop_reason=stop, usage=Usage(10, 4000))
+
+    r = asyncio.run(ask("what is going on", data=AnalystData(None, demo=True), ai=Flaky(), state=StaticEntityState()))
+    assert "couldn't produce" not in r.answer
+    assert r.answer.startswith("What happened:\n1. ") and "Evidence: E1, E2, E3" in r.answer
+
+
+def test_analyst_gets_room_to_think():
+    from analyst.service import ANALYST_MAX_TOKENS
+
+    assert ANALYST_MAX_TOKENS >= 4000
+
+
+def test_freeze_proposals_only_target_real_agents(monkeypatch):
+    import analyst.service as svc
+    import engine
+
+    created = []
+    monkeypatch.setattr(
+        engine, "create_approval", lambda db, iid, *, requested_by="x": created.append(iid) or {"id": "a"}
+    )
+
+    async def propose(entity):
+        async def fake_model(*_a, **_k):
+            return {"answer": "What happened:\n1. x (E1)", "propose": {"action": "freeze_agent", "entity": entity}}
+
+        monkeypatch.setattr(svc, "_model_reply", fake_model)
+
+        class Live:
+            provider = type("P", (), {"name": "anthropic"})()
+
+        data = AnalystData(object(), demo=True)
+        return await ask("what should I do about inc-demo?", data=data, ai=Live(), state=StaticEntityState())
+
+    assert asyncio.run(propose("j.smith")).approval_id is None  # a person, not an agent
+    assert asyncio.run(propose("finance_agent")).approval_id == "a"

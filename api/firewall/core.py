@@ -60,12 +60,14 @@ class TaskContext:
     approvals: list[str] = field(default_factory=list)
     max_risk: int = 0
     policy_error: str | None = None
+    pending: list[dict] = field(default_factory=list)  # decisions not yet written via record_event
 
 
 class Firewall:
-    def __init__(self, ctx: TaskContext, state: EntityStateReader | None = None):
+    def __init__(self, ctx: TaskContext, state: EntityStateReader | None = None, db: Any | None = None):
         self.ctx = ctx
         self.state = state or EntityStateReader(None)
+        self.db = db if db is not None else self.state.db  # where record_event writes (None = engine default)
 
     @classmethod
     def for_task(
@@ -81,6 +83,7 @@ class Firewall:
         dlp_profile: str = "internal",
         detectors_enabled: bool = True,
         record_allowed: bool = True,
+        db: Any | None = None,
     ) -> Firewall:
         policy: AgentPolicy | None
         error = None
@@ -104,7 +107,7 @@ class Firewall:
             record_allowed=record_allowed,
             policy_error=error,
         )
-        return cls(ctx, state)
+        return cls(ctx, state, db)
 
     # ---------------------------------------------------------------- recording
     def _decide(
@@ -122,26 +125,30 @@ class Firewall:
         ctx.max_risk = max(ctx.max_risk, risk)
         if verdict == "blocked" and layer and layer not in ctx.blocked_layers:
             ctx.blocked_layers.append(layer)
-        skip = verdict == "allowed" and not ctx.record_allowed
-        event = (
-            None
-            if skip
-            else record(
-                actor=ctx.actor,
-                target=ctx.target,
-                source=ctx.source,
-                action=action or f"{'tool_call' if verdict == 'allowed' else 'tool_call_' + verdict}:{tool}",
-                risk=risk,
-                verdict=verdict,
-                reason=reason,
-                mitre=mitre,
+        if verdict != "allowed" or ctx.record_allowed:
+            ctx.pending.append(
+                {
+                    "actor": ctx.actor,
+                    "target": ctx.target,
+                    "source": ctx.source,
+                    "action": action or f"{'tool_call' if verdict == 'allowed' else 'tool_call_' + verdict}:{tool}",
+                    "risk": risk,
+                    "verdict": verdict,
+                    "reason": reason,
+                    "mitre": mitre,
+                }
             )
-        )
-        if event is not None:
-            ctx.events.append(event)
         decision = Decision(tool=tool, verdict=verdict, layer=layer, reason=reason)
         ctx.decisions.append(decision)
         return decision
+
+    async def _flush(self) -> None:
+        """Write pending decisions via engine.record_event, in order, off the event loop."""
+        specs, self.ctx.pending = self.ctx.pending, []
+        if not specs:
+            return
+        events = await asyncio.to_thread(lambda: [record(db=self.db, **spec) for spec in specs])
+        self.ctx.events.extend(e for e in events if e is not None)
 
     def _attack_tags(self, *extra: str, hijack: bool = True) -> list[MitreTag]:
         keys = [*extra, "agent_tool_invocation"]
@@ -181,6 +188,31 @@ class Firewall:
 
     # ---------------------------------------------------------------- guard protocol
     async def before_tool(self, tool: str, args: dict[str, Any]) -> Decision:
+        try:
+            return await self._before_tool(tool, args)
+        finally:
+            await self._flush()
+
+    async def after_tool(self, tool: str, args: dict[str, Any], result: ToolResult) -> str:
+        try:
+            return await self._after_tool(tool, args, result)
+        finally:
+            await self._flush()
+
+    async def filter_output(self, text: str) -> str:
+        try:
+            return await self._filter_output(text)
+        finally:
+            await self._flush()
+
+    async def screen_request(self, text: str) -> DetectorOutcome:
+        """Scan a request typed by an untrusted requester (e.g. /attack direct delivery)."""
+        try:
+            return await self._scan_untrusted(text, "the request", indirect=False)
+        finally:
+            await self._flush()
+
+    async def _before_tool(self, tool: str, args: dict[str, Any]) -> Decision:
         ctx, policy = self.ctx, self.ctx.policy
         if policy is None:
             return self._block(tool, "scope_policy", f"No valid policy for {ctx.agent}, so nothing may run.")
@@ -289,6 +321,7 @@ class Firewall:
             mitre=self._attack_tags(),
         )
         ctx.held_layers.append(layer)
+        await self._flush()  # the approval needs the saved event (and its incident)
         event = ctx.events[-1] if ctx.events else None
         summary = (
             f"Kairos held a {tool} action by {ctx.agent} for {ctx.actor} "
@@ -363,7 +396,7 @@ class Firewall:
         risk = scoring.ALLOWED_SEND if sensitive else scoring.ALLOWED_READ
         return self._decide(tool, "allowed", "scope_policy", f"'{tool}' is allowed for this task.", risk)
 
-    async def after_tool(self, tool: str, args: dict[str, Any], result: ToolResult) -> str:
+    async def _after_tool(self, tool: str, args: dict[str, Any], result: ToolResult) -> str:
         if not result.untrusted:
             return result.content
         self.ctx.untrusted_seen = True
@@ -402,11 +435,7 @@ class Firewall:
         )
         return outcome
 
-    async def screen_request(self, text: str) -> DetectorOutcome:
-        """Scan a request typed by an untrusted requester (e.g. /attack direct delivery)."""
-        return await self._scan_untrusted(text, "the request", indirect=False)
-
-    async def filter_output(self, text: str) -> str:
+    async def _filter_output(self, text: str) -> str:
         if canary_hit(text):
             self.ctx.canary_hits += 1
             self._decide(

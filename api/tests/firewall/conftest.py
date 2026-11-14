@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -11,15 +13,27 @@ from agents.victim.planner import GulliblePlanner
 from agents.victim.runner import run_agent
 from agents.victim.tools import OUTBOX
 from firewall.integrations import StaticEntityState
+from schemas.kairos import Event
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def events(monkeypatch):
+    """Capture every record_event call. With a db (the in-memory fake) Daylen's real engine runs;
+    without one we build the Event locally so no test ever reaches the real Supabase."""
     captured = []
     real = engine.record_event
 
-    def spy(**kw):
-        ev = real(**kw)
+    def spy(*, db=None, **kw):
+        if db is not None:
+            ev = real(db=db, **kw)
+        else:
+            risk = max(0, min(100, int(kw["risk"])))
+            ev = Event(
+                id=str(uuid.uuid4()),
+                created_at=datetime.now(UTC),
+                level=engine.score_to_level(risk),
+                **{**kw, "risk": risk, "mitre": kw.get("mitre") or []},
+            )
         captured.append(ev)
         return ev
 

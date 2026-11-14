@@ -5,7 +5,9 @@ Miles's Red Team chain can import `run_agent` directly instead of going through 
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
+from typing import Any
 
 from agents.victim.agent import AgentRun, run_task
 from agents.victim.fixtures import Email
@@ -58,6 +60,7 @@ async def run_agent(
     dlp_profile: str = "internal",
     detectors_enabled: bool = True,
     force_real_model: bool = False,
+    db: Any | None = None,
 ) -> AgentOutcome:
     planner = planner or pick_planner(ai or get_ai_service(), force_real_model=force_real_model)
     workspace = Workspace.fresh(owner, mode=mode, actor=actor, extra_emails=extra_emails)
@@ -73,15 +76,17 @@ async def run_agent(
             requester_trusted=requester_trusted,
             dlp_profile=dlp_profile,
             detectors_enabled=detectors_enabled,
+            db=db,
         )
     run = await run_task(user_request, workspace=workspace, planner=planner, guard=fw)
     breaches = breach_reasons(run, outsider=dlp_profile == "public")
     if fw is None:
-        _record_unprotected(run, breaches, actor=actor, source=source)
+        db = db if db is not None else getattr(state, "db", None)
+        await asyncio.to_thread(_record_unprotected, run, breaches, actor=actor, source=source, db=db)
     return AgentOutcome(run=run, firewall=fw, breaches=breaches)
 
 
-def _record_unprotected(run: AgentRun, breaches: list[str], *, actor: str, source: Source) -> None:
+def _record_unprotected(run: AgentRun, breaches: list[str], *, actor: str, source: Source, db: Any = None) -> None:
     """Side-by-side demo: show what happened with the firewall OFF. Action is prefixed `unprotected:`
     so stats can keep these out of the real "0 breaches" counter."""
     if breaches:
@@ -94,6 +99,7 @@ def _record_unprotected(run: AgentRun, breaches: list[str], *, actor: str, sourc
             verdict="allowed",
             reason="Unprotected mode (firewall off): " + "; ".join(breaches) + ".",
             mitre=[tag("prompt_injection_indirect"), tag("agent_tool_invocation"), tag("llm_data_leakage")],
+            db=db,
         )
     else:
         record(
@@ -104,4 +110,5 @@ def _record_unprotected(run: AgentRun, breaches: list[str], *, actor: str, sourc
             risk=scoring.ALLOWED_READ,
             verdict="allowed",
             reason="Unprotected mode (firewall off): nothing left the company this time.",
+            db=db,
         )

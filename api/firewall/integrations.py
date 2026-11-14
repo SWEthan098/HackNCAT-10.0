@@ -35,7 +35,9 @@ def record(
     verdict: Verdict,
     reason: str,
     mitre: list[MitreTag] | None = None,
+    db: Any | None = None,
 ) -> Event | None:
+    """Blocking (it writes to the database): the firewall calls it from a worker thread."""
     try:
         return engine.record_event(
             sensor=SENSOR,
@@ -47,6 +49,7 @@ def record(
             verdict=verdict,
             reason=reason,
             mitre=mitre or [],
+            **({"db": db} if db is not None else {}),
         )
     except Exception as e:  # never let logging failures change a decision
         logger.error("firewall: record_event failed (%s)", type(e).__name__)

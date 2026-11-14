@@ -91,7 +91,7 @@ def test_firewall_never_writes_entity_state():
                     return type("R", (), {"data": []})()
 
                 def __getattr__(self, op):
-                    if op in ("insert", "update", "upsert", "delete"):
+                    if name == "entity_state" and op in ("insert", "update", "upsert", "delete"):
                         spy.writes.append((name, op))
                     raise AttributeError(op)
 

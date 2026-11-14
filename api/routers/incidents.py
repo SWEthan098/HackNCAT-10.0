@@ -39,6 +39,27 @@ def request_containment(incident_id: str, user: AuthUser = Depends(current_user)
 
 
 @router.post(
+    "/{incident_id}/release",
+    response_model=Approval,
+    summary="Request lifting containment: creates a pending approval for a human to decide",
+)
+def request_release(
+    incident_id: str, user: AuthUser = Depends(require_any_role(*DEFENDER_ROLES)), db=Depends(get_db)
+) -> Approval:
+    """Analyst or approver role. Only for a contained incident; unlocks nothing by itself.
+
+    The approval lists what is still locked or frozen ("Unlock j.smith and unfreeze
+    finance_agent?"). A different person must approve it on the phone. Asking twice returns the
+    same approval. 409 if the incident isn't contained or nothing is still held; 403 if you
+    appear in the incident.
+    """
+    engine.get_incident(db, incident_id)  # 404 for unknown or malformed ids
+    return Approval(
+        **engine.request_release(db, incident_id, requested_by=f"user:{user.id}", identities=user_identities(user))
+    )
+
+
+@router.post(
     "/{incident_id}/false-positive",
     response_model=Incident,
     summary="Mark an incident as a false positive (High/Critical: an approver confirms first)",

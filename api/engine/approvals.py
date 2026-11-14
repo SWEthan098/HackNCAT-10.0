@@ -11,7 +11,11 @@ Two kinds of approval share the phone:
 - false_positive  an analyst says a High/Critical incident was not an attack. Approve = close it
                   as a false positive (and cancel pending containment). Until then nothing
                   changes. The approver can't be the person who asked, or anyone who appears
-                  in the incident's events.
+                  in the incident's events. If the incident was already contained, the
+                  request lists the locks/freezes still in force and approving undoes them.
+- release         an analyst asks to lift a contained incident's containment. Approve = unlock
+                  the accounts and unfreeze the agents still held (accounts also leave the
+                  watch list), incident closed. Same two-person and conflict rules.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from datetime import timedelta
 
 from core.errors import AppError
 from engine.audit import write_audit
-from engine.containment import apply_action
+from engine.containment import UNDO, apply_action, still_in_force
 from engine.incidents import close_as_false_positive
 from engine.scoring import risk_math
 from engine.util import involves, iso, now, parse_ts, safe_name, unique
@@ -28,6 +32,7 @@ from engine.util import involves, iso, now, parse_ts, safe_name, unique
 APPROVAL_TIMEOUT_SECONDS = 300
 CONTAINMENT = "containment"
 FALSE_POSITIVE = "false_positive"
+RELEASE = "release"
 # Incidents in these states can no longer be contained.
 FINISHED = ("closed", "false_positive")
 
@@ -36,7 +41,28 @@ _ACTION_TEXT = {
     "lock_account": "lock account {entity}",
     "revoke_sessions": "revoke sessions for {entity}",
     "freeze_agent": "freeze agent {entity}",
+    "unlock_account": "unlock account {entity}",
+    "unfreeze_agent": "unfreeze agent {entity}",
 }
+
+
+def _todo(actions: list[dict]) -> str:
+    return "; ".join(_ACTION_TEXT[a["action"]].format(entity=a["entity"]) for a in actions)
+
+
+def undo_actions(db, incident_id: str) -> list[dict]:
+    """What approved containment for this incident locked or froze that is still in force."""
+    approved = (
+        db.table("approvals")
+        .select("*")
+        .eq("incident_id", incident_id)
+        .eq("status", "approved")
+        .eq("kind", CONTAINMENT)
+        .execute()
+    ).data or []
+    done = [a for ap in approved for a in (ap.get("actions") or []) if a.get("action") in UNDO]
+    undo = [{"action": UNDO[a["action"]], "entity": a["entity"]} for a in done if still_in_force(db, a)]
+    return list({(a["action"], a["entity"]): a for a in undo}.values())
 
 
 def proposed_actions(events: list[dict]) -> list[dict]:
@@ -56,7 +82,7 @@ def approval_summary(incident: dict, events: list[dict], actions: list[dict]) ->
     sensors = unique(e["sensor"] for e in events)
     math = risk_math([e["risk"] for e in events], len(sensors))
     listeners = ", ".join(SENSOR_NAMES.get(s, s) for s in sensors) or "no listeners"
-    todo = "; ".join(_ACTION_TEXT[a["action"]].format(entity=a["entity"]) for a in actions)
+    todo = _todo(actions)
     plural = "s" if len(events) != 1 else ""
     return (
         f"{str(incident['level']).capitalize()} incident, risk {incident['risk']} ({math}). "
@@ -66,17 +92,35 @@ def approval_summary(incident: dict, events: list[dict], actions: list[dict]) ->
     )
 
 
-def false_positive_summary(incident: dict, events: list[dict]) -> str:
+def false_positive_summary(incident: dict, events: list[dict], undo: list[dict] | None = None) -> str:
     sensors = unique(e["sensor"] for e in events)
     math = risk_math([e["risk"] for e in events], len(sensors))
     listeners = ", ".join(SENSOR_NAMES.get(s, s) for s in sensors) or "no listeners"
     plural = "s" if len(events) != 1 else ""
+    if incident["status"] == "contained":
+        then = f"close the incident as a false positive and undo its containment: {_todo(undo or []) or 'nothing'}"
+        unchanged = "nothing changes and the containment stays in place"
+    else:
+        then = "close the incident as a false positive and cancel any pending containment"
+        unchanged = "nothing changes and the incident stays open"
     return (
         f"Confirm false positive: {str(incident['level']).capitalize()} incident, risk {incident['risk']} "
         f"({math}). {len(events)} linked event{plural} from {listeners}. "
         "An analyst says this was not an attack. "
-        "If approved: close the incident as a false positive and cancel any pending containment. "
-        "If denied or unanswered: nothing changes and the incident stays open."
+        f"If approved: {then}. If denied or unanswered: {unchanged}."
+    )
+
+
+def release_summary(incident: dict, undo: list[dict]) -> str:
+    """'Unlock j.smith and unfreeze finance_agent?' plus the facts. Code template, safe names only."""
+    verbs = {"unlock_account": "unlock", "unfreeze_agent": "unfreeze"}
+    parts = [f"{verbs[a['action']]} {a['entity']}" for a in undo]
+    question = (", ".join(parts[:-1]) + " and " + parts[-1]) if len(parts) > 1 else parts[0]
+    return (
+        f"{question[0].upper()}{question[1:]}? "
+        f"Lift containment on a {str(incident['level']).capitalize()} incident, risk {incident['risk']}. "
+        f"If approved: {_todo(undo)}; the incident is closed. Signed-out sessions stay signed out. "
+        "If denied or unanswered: everything stays locked."
     )
 
 
@@ -194,13 +238,15 @@ def request_false_positive_approval(db, incident: dict, events: list[dict], *, r
     pending = _pending(db, incident["id"], FALSE_POSITIVE)
     if pending:
         return pending
+    # If the incident was already contained, approving also undoes what is still locked/frozen.
+    undo = undo_actions(db, incident["id"]) if incident["status"] == "contained" else []
     row = {
         "incident_id": incident["id"],
         "kind": FALSE_POSITIVE,
         "requested_by": requested_by,
         "status": "pending",
-        "summary": false_positive_summary(incident, events),
-        "actions": [],
+        "summary": false_positive_summary(incident, events, undo),
+        "actions": undo,
         "expires_at": iso(now() + timedelta(seconds=APPROVAL_TIMEOUT_SECONDS)),
     }
     approval = db.table("approvals").insert(row).execute().data[0]
@@ -213,15 +259,53 @@ def request_false_positive_approval(db, incident: dict, events: list[dict], *, r
     return approval
 
 
-def _check_false_positive_decider(db, approval: dict, *, user_id: str, approve: bool, identities) -> None:
-    """Two people, and neither of them involved: the asker can't confirm their own request."""
+def request_release(db, incident_id: str, *, requested_by: str, identities=()) -> dict:
+    """Ask an approver to lift a contained incident's containment. Returns the pending approval.
+
+    Lists only what is still locked/frozen. Asking again returns the request already waiting.
+    Refused for anyone who appears in the incident (nobody asks to unlock themselves).
+    """
+    incident = _incident(db, incident_id)
+    if incident["status"] != "contained":
+        raise AppError(409, "incident_not_contained", "Only a contained incident can have its containment lifted")
+    if involves(_events(db, incident_id), identities):
+        raise AppError(403, "conflict_of_interest", "You appear in this incident, so someone else must ask")
+    pending = _pending(db, incident_id, RELEASE)
+    if pending:
+        return pending
+    undo = undo_actions(db, incident_id)
+    if not undo:
+        raise AppError(409, "nothing_to_release", "Nothing from this incident is still locked or frozen")
+    row = {
+        "incident_id": incident_id,
+        "kind": RELEASE,
+        "requested_by": requested_by,
+        "status": "pending",
+        "summary": release_summary(incident, undo),
+        "actions": undo,
+        "expires_at": iso(now() + timedelta(seconds=APPROVAL_TIMEOUT_SECONDS)),
+    }
+    approval = db.table("approvals").insert(row).execute().data[0]
+    write_audit(
+        db,
+        actor=requested_by,
+        action="release_requested",
+        detail={"approval_id": approval["id"], "incident_id": incident_id, "actions": undo},
+    )
+    return approval
+
+
+def _check_second_person(db, approval: dict, *, user_id: str, approve: bool, identities) -> None:
+    """Letting something back in needs two people, neither of them involved in the incident."""
     if approval.get("requested_by") == f"user:{user_id}":
         raise AppError(403, "two_person_rule", "Someone other than the person who asked must decide this")
     if not approve:
-        return  # refusing to dismiss is always safe
+        return  # refusing is always safe
     incident = _incident(db, approval["incident_id"])
-    if incident["status"] in FINISHED or incident["status"] == "contained":
+    if incident["status"] in FINISHED:
         raise AppError(409, "incident_not_open", f"This incident is already {incident['status']}")
+    if _kind(approval) == RELEASE and incident["status"] != "contained":
+        raise AppError(409, "incident_not_contained", f"This incident is {incident['status']}, not contained")
     if involves(_events(db, approval["incident_id"]), identities):
         raise AppError(403, "conflict_of_interest", "You appear in this incident, so another approver must decide")
 
@@ -262,8 +346,8 @@ def decide_approval(db, approval_id: str, *, user_id: str, approve: bool, identi
         _expire(db, approval)
         raise AppError(409, "approval_expired", "This approval timed out. Nothing was locked.")
     kind = _kind(approval)
-    if kind == FALSE_POSITIVE:
-        _check_false_positive_decider(db, approval, user_id=user_id, approve=approve, identities=identities)
+    if kind in (FALSE_POSITIVE, RELEASE):
+        _check_second_person(db, approval, user_id=user_id, approve=approve, identities=identities)
 
     status = "approved" if approve else "denied"
     # The status filter makes a double tap (or two approvers) decide only once.
@@ -287,7 +371,16 @@ def decide_approval(db, approval_id: str, *, user_id: str, approve: bool, identi
     )
     if kind == FALSE_POSITIVE:
         if approve:
+            for action in approval.get("actions") or []:  # only ever unlock / unfreeze
+                apply_action(db, action, by=by)
             close_as_false_positive(db, approval["incident_id"], by=by, approval_id=approval_id)
+        return approval
+    if kind == RELEASE:
+        if approve:
+            for action in approval.get("actions") or []:  # only ever unlock / unfreeze
+                apply_action(db, action, by=by)
+            db.table("incidents").update({"status": "closed"}).eq("id", approval["incident_id"]).execute()
+            _cancel_other_pending(db, approval["incident_id"], by=by)
         return approval
     if approve:
         for action in approval.get("actions") or []:

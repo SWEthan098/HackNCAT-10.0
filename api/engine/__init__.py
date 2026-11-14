@@ -19,9 +19,24 @@ from typing import Any
 from core.db import supabase_admin
 from core.errors import AppError
 from engine.appeals import create_appeal, list_appeals
-from engine.approvals import APPROVAL_TIMEOUT_SECONDS, create_approval, decide_approval, expire_stale_approvals
+from engine.approvals import (
+    APPROVAL_TIMEOUT_SECONDS,
+    create_approval,
+    decide_approval,
+    expire_stale_approvals,
+    request_release,
+)
 from engine.audit import verify_audit, write_audit
-from engine.containment import ACCOUNT_LOCKED_MESSAGE, freeze_agent, is_frozen, is_locked, kill_switch
+from engine.containment import (
+    ACCOUNT_LOCKED_MESSAGE,
+    freeze_agent,
+    is_frozen,
+    is_locked,
+    kill_switch,
+    kill_switch_off,
+    unfreeze_agent,
+    unlock_account,
+)
 from engine.correlation import correlate
 from engine.false_positive import mark_false_positive
 from engine.feed import maybe_purge, publish_attempt, purge_raw_login_data, sanitize_text
@@ -49,17 +64,21 @@ __all__ = [
     "is_frozen",
     "is_locked",
     "kill_switch",
+    "kill_switch_off",
     "list_appeals",
     "list_incidents",
     "mark_false_positive",
     "publish_attempt",
     "purge_raw_login_data",
     "record_event",
+    "request_release",
     "reset_demo",
     "risk_math",
     "sanitize_text",
     "score_to_level",
     "set_incident_summary",
+    "unfreeze_agent",
+    "unlock_account",
     "verify_audit",
     "write_audit",
 ]

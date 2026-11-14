@@ -4,6 +4,8 @@ Dismissing an incident is a disruptive decision, so it is guarded like containme
 - Low/Medium: closes at once (the caller already holds the analyst or approver role).
 - High/Critical: becomes a request an approver confirms on the phone. Until then nothing
   changes: the incident stays open and any pending containment approval stays tappable.
+- Already contained: also needs an approver, and the request offers to undo the containment
+  (unlock the accounts, unfreeze the agents it locked). Approving does both at once.
 - Anyone who appears as an actor or target in the incident's events is refused, so a
   compromised account can't dismiss the incident about itself.
 """
@@ -27,8 +29,6 @@ def mark_false_positive(
     `identities` are the caller's names (core.roles.user_identities) for the conflict check.
     """
     incident = _row(db, incident_id)  # 404 for unknown or malformed ids
-    if incident["status"] == "contained":
-        raise AppError(409, "incident_contained", "This incident was already contained by an approver")
     if incident["status"] in FINISHED:
         raise AppError(409, "incident_not_open", f"This incident is already {incident['status']}")
     events = db.table("events").select("*").eq("incident_id", incident_id).order("created_at").execute().data
@@ -36,7 +36,7 @@ def mark_false_positive(
         raise AppError(403, "conflict_of_interest", "You appear in this incident, so someone else must review it")
 
     by = f"user:{user_id}"
-    if incident["level"] in CONFIRM_LEVELS:
+    if incident["level"] in CONFIRM_LEVELS or incident["status"] == "contained":
         approval = request_false_positive_approval(db, incident, events, requested_by=by, reason=reason)
         return Incident(**get_incident(db, incident_id).model_dump(exclude={"events"})), approval
     return close_as_false_positive(db, incident_id, by=by, reason=reason), None

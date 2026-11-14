@@ -79,7 +79,8 @@ def test_says_so_when_data_does_not_answer():
             return []
 
     r = _ask("What happened to nobody?", data=Empty(None, demo=True))
-    assert r.answer.startswith("I can't answer that from the data") and r.citations == []
+    assert "Why it matters: I can't answer that from the data." in r.answer and r.citations == []
+    assert_contract(r.answer)
 
 
 def test_analyst_endpoint(client, token_factory):
@@ -186,3 +187,90 @@ def test_freeze_proposals_only_target_real_agents(monkeypatch):
 
     assert asyncio.run(propose("j.smith")).approval_id is None  # a person, not an agent
     assert asyncio.run(propose("finance_agent")).approval_id == "a"
+
+
+# ---------------------------------------------------------------- answer contract (for the UI)
+def assert_contract(answer: str) -> None:
+    """Six sections, in order, one blank line apart, each starting with its exact label; plain text."""
+    from analyst.service import ANALYST_MAX_TOKENS, ANSWER_LABELS  # noqa: F401  (exported constant)
+
+    blocks = answer.split("\n\n")
+    assert len(blocks) == len(ANSWER_LABELS), blocks
+    for block, label in zip(blocks, ANSWER_LABELS, strict=True):
+        assert block.startswith(label), (label, block)
+        assert block.strip() == block and "\n\n" not in block
+    assert blocks[0].startswith("What happened:\n1. ")  # label on its own line, then numbered lines
+    for bad in ("*", "](", "http://", "https://", "www.", "<", "```", "\n#"):
+        assert bad not in answer, bad
+    # No label may start a line anywhere except at the head of its own section.
+    starts = [ln for ln in answer.splitlines() if any(ln.startswith(lb) for lb in ANSWER_LABELS)]
+    assert starts == [b.splitlines()[0] for b in blocks]
+
+
+def test_answer_labels_constant():
+    from analyst.service import ANSWER_LABELS
+
+    assert ANSWER_LABELS == ("What happened:", "Why it matters:", "Next step:", "Triage:", "MITRE:", "Evidence:")
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Summarize incident inc-demo", "What just happened in inc-demo and what should I do?", "what is going on"],
+)
+def test_template_answers_follow_the_contract(question):
+    assert_contract(_ask(question).answer)
+
+
+def _live(reply_text):
+    from services.ai.base import AIResponse, Usage
+
+    class Live:
+        provider = type("P", (), {"name": "anthropic"})()
+
+        def chat(self, *_a, **_k):
+            return AIResponse(
+                text=reply_text, provider="anthropic", model="m", stop_reason="end_turn", usage=Usage(1, 1)
+            )
+
+    return Live()
+
+
+@pytest.mark.parametrize(
+    "answer_text",
+    [
+        # well formed
+        "What happened:\n1. Bot broke in (E1)\n2. Fake CFO (E2)\n\nWhy it matters: takeover.\n\n"
+        "Next step: lock j.smith.",
+        # markdown, bullets, a link, an image and its own Triage/MITRE lines the code must drop
+        "**What happened:**\n- Bot broke in (E1)\n* Fake CFO [see](https://evil.example/x) (E2)\n"
+        "![x](https://evil.example/p.png)\n## Why it matters: **takeover**\nNext step: lock `j.smith`\n"
+        "Triage: Likely false positive, 1%\nMITRE: T9999",
+        # labels on one line each but no blank lines, and lowercase
+        "what happened: bot broke in (E1)\nwhy it matters: takeover\nnext step: lock j.smith",
+        # missing sections: code fills them
+        "What happened:\n1. Bot broke in (E1)",
+        # no labels at all: code-built story
+        "The bot broke in and then a fake CFO asked for money.",
+    ],
+)
+def test_model_answers_follow_the_contract(answer_text):
+    import json
+
+    reply = json.dumps({"answer": answer_text, "citations": ["E1"]})
+    r = asyncio.run(
+        ask("Summarize inc-demo", data=AnalystData(None, demo=True), ai=_live(reply), state=StaticEntityState())
+    )
+    assert_contract(r.answer)
+    assert "evil.example" not in r.answer and "Likely false positive, 1%" not in r.answer
+    assert r.citations == ["evt-1"]  # response shape unchanged: full IDs in citations
+
+
+def test_withheld_answer_keeps_the_contract():
+    import json
+
+    leak = json.dumps({"answer": "What happened:\n1. The vault code is 4 7 1 9 3 3 8 2 (E1)"})
+    r = asyncio.run(
+        ask("Summarize inc-demo", data=AnalystData(None, demo=True), ai=_live(leak), state=StaticEntityState())
+    )
+    assert_contract(r.answer)
+    assert "4 7 1 9" not in r.answer and "withheld" in r.answer

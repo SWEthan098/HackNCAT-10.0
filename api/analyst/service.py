@@ -66,6 +66,87 @@ def mitre_chain(technique_ids: list[str]) -> str:
     return " → ".join(f"{_BY_ID[t].name} ({t})" for t in technique_ids if t in _BY_ID)
 
 
+# ------------------------------------------------------------------------------ answer contract
+# Every answer is plain text made of exactly these six sections, in this order, separated by one
+# blank line. Each section starts at the beginning of a line with its label, spelled exactly:
+#
+#   What happened:            <- label alone on its line, then numbered lines "1. ...", "2. ..."
+#   Why it matters: <text>
+#   Next step: <text>
+#   Triage: <text or "none">
+#   MITRE: <Name (ID) -> ... or "none">
+#   Evidence: <E1, E2, ... or "none">
+#
+# Code builds this shape (compose_answer), whatever the model wrote, so the UI can split on labels.
+ANSWER_LABELS: tuple[str, ...] = ("What happened:", "Why it matters:", "Next step:", "Triage:", "MITRE:", "Evidence:")
+_MODEL_LABELS = ANSWER_LABELS[:3]  # the model writes these; Triage/MITRE/Evidence are always code
+_LABEL_AT_LINE_START = re.compile(
+    r"(?im)^[ \t>#*\-]*(what happened|why it matters|next step|triage|mitre|evidence)[ \t*]*:[ \t]*"
+)
+_MD_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_URL = re.compile(r"\b(?:https?://|www\.)\S+", re.I)
+_HTML_TAG = re.compile(r"</?[a-z][^>]*>", re.I)
+_LIST_MARK = re.compile(r"^\s*(?:[-•*]+|\d+[.)])\s*")
+
+
+def _plain(text: str) -> str:
+    """Plain text only: no markdown emphasis, headings, code ticks, images, links or HTML."""
+    text = _MD_IMAGE.sub("", text)
+    text = _MD_LINK.sub(r"\1", text)
+    text = _URL.sub("[link removed]", text)
+    text = _HTML_TAG.sub("", text)
+    text = text.replace("*", "").replace("`", "").replace("~~", "")
+    return "\n".join(line.lstrip("#").rstrip() for line in text.splitlines())
+
+
+def parse_sections(text: str) -> dict[str, Any]:
+    """Pull the model-written sections out of free text (tolerates markdown and missing pieces).
+
+    Returns {"What happened:": [up to 3 lines], "Why it matters:": str, "Next step:": str}; any
+    section the text doesn't have comes back empty. Triage/MITRE/Evidence in the text are dropped.
+    """
+    text = _plain(text)
+    found = {label: "" for label in ANSWER_LABELS}
+    marks = list(_LABEL_AT_LINE_START.finditer(text))
+    for i, m in enumerate(marks):
+        label = next(lb for lb in ANSWER_LABELS if lb[:-1].lower() == m.group(1).lower())
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+        found[label] = (found[label] + "\n" + text[m.end() : end]).strip()
+    lines = [_LIST_MARK.sub("", ln).strip() for ln in found["What happened:"].splitlines()]
+    return {
+        "What happened:": [ln for ln in lines if ln][:3],
+        "Why it matters:": " ".join(found["Why it matters:"].split()),
+        "Next step:": " ".join(found["Next step:"].split()),
+    }
+
+
+def compose_answer(body: dict[str, Any], triage_text: str | None, mitre_text: str, evidence: str) -> str:
+    happened = body.get("What happened:") or ["No details available."]
+    sections = [
+        "What happened:\n" + "\n".join(f"{i}. {line}" for i, line in enumerate(happened, 1)),
+        f"Why it matters: {body.get('Why it matters:') or 'No assessment available.'}",
+        f"Next step: {body.get('Next step:') or 'Review the incident.'}",
+        f"Triage: {triage_text or 'none'}",
+        f"MITRE: {mitre_text or 'none'}",
+        f"Evidence: {evidence or 'none'}",
+    ]
+    return "\n\n".join(_plain(s) for s in sections)
+
+
+async def _filtered(fw: Firewall, answer: str) -> str:
+    """Firewall output filter (canary, DLP, link strip). If it withholds the reply, keep the shape."""
+    out = await fw.filter_output(answer)
+    if out.startswith(ANSWER_LABELS[0]):
+        return out
+    body = {
+        "What happened:": ["Kairos withheld this answer because it contained protected data."],
+        "Why it matters:": "Protected data never leaves through the analyst.",
+        "Next step:": "Ask the question again in different words.",
+    }
+    return compose_answer(body, None, "none", "none")
+
+
 def _shorten_ids(text: str, labels: dict[str, str]) -> str:
     """Swap any full event ID the model wrote anyway for its short label, so sentences stay readable."""
     for event_id, label in sorted(labels.items(), key=lambda kv: -len(kv[0])):
@@ -176,7 +257,12 @@ async def ask(
 
     if not events:
         why = "the event store is unreachable right now" if data.unavailable else "there are no matching events"
-        answer = await fw.filter_output(f"I can't answer that from the data: {why}.")
+        body = {
+            "What happened:": [f"No events to report: {why}."],
+            "Why it matters:": "I can't answer that from the data.",
+            "Next step:": "Try again in a moment, or ask about a specific incident or account.",
+        }
+        answer = await _filtered(fw, compose_answer(body, None, "none", "none"))
         return AnalystAnswer(answer=answer, triage=None, firewall=fw)
 
     # Short labels in the text (E1, E2, ...) in time order; full IDs stay in `citations` for links.
@@ -196,19 +282,21 @@ async def ask(
     citations = [c for c in dict.fromkeys(cited) if c in known_ids]
     if not citations:
         citations = [str(e.get("id")) for e in ordered][:10]
-    text = str(reply.get("answer") or "").strip() or "I couldn't produce a summary from the data."
-    text = fix_mitre_ids(_shorten_ids(text, labels))
     cited_mitre = mitre_ids
-    lines = []
-    if tri:
-        lines.append(f"Triage: {tri.text()} ({tri.priority}): {tri.reason}.")
-    lines.append("MITRE: " + (mitre_chain(cited_mitre) or "none"))
-    lines.append("Evidence: " + ", ".join(labels[c] for c in citations))
+    text = fix_mitre_ids(_shorten_ids(str(reply.get("answer") or ""), labels))
+    body = parse_sections(text)
+    fallback = parse_sections(_template_reply(question, incident, ordered, labels)["answer"])
+    if not body["What happened:"]:  # the model ignored the shape: the code-built story fills in
+        body = fallback
+    for label in _MODEL_LABELS[1:]:  # a missing "Why it matters" / "Next step" comes from code too
+        body[label] = body[label] or fallback[label]
 
     approval_id = await _maybe_propose(fw, reply.get("propose"), incident, events, data)
     if approval_id:
-        lines.append("A containment request is waiting for human approval on /approve.")
-    answer = await fw.filter_output(text + "\n\n" + "\n".join(lines))
+        body["Next step:"] += " A containment request is waiting for human approval on /approve."
+    triage_text = f"{tri.text()} ({tri.priority}): {tri.reason}." if tri else "none"
+    evidence = ", ".join(labels[c] for c in citations)
+    answer = await _filtered(fw, compose_answer(body, triage_text, mitre_chain(cited_mitre) or "none", evidence))
     return AnalystAnswer(answer, citations, cited_mitre, tri, approval_id, fw)
 
 

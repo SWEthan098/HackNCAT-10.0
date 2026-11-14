@@ -179,7 +179,7 @@ async def _tool(fw: Firewall, tool: str, args: dict, run) -> Any:
     decision = await fw.before_tool(tool, args)
     if decision.verdict != "allowed":
         return None
-    result = run()
+    result = await asyncio.to_thread(run)  # database reads are blocking; keep the event loop free
     payload = json.dumps(result, default=str)[:12000]
     screened = await fw.after_tool(tool, args, ToolResult(payload, origin=f"{tool}", untrusted=True))
     return result, screened

@@ -13,6 +13,7 @@ Hard rules never depend on an AI detector being right.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,7 +21,7 @@ import engine
 from agents.victim.tools import ToolResult
 from firewall import detection, dlp, rules, scoring
 from firewall.detection import DetectorOutcome
-from firewall.integrations import EntityStateReader, record, request_approval
+from firewall.integrations import GLOBAL_FREEZE_ENTITIES, EntityStateReader, record, request_approval
 from firewall.policy import AgentPolicy, PolicyError, get_policy
 from firewall.scope import Scope, derive_scope
 from firewall.taint import TaintTracker, labels_requested, recipients
@@ -183,7 +184,9 @@ class Firewall:
         ctx, policy = self.ctx, self.ctx.policy
         if policy is None:
             return self._block(tool, "scope_policy", f"No valid policy for {ctx.agent}, so nothing may run.")
-        contained = self._check_containment(tool)
+        # One batched lookup in a worker thread, so a slow database never stalls the event loop.
+        await asyncio.to_thread(self.state.prefetch, [ctx.agent, *GLOBAL_FREEZE_ENTITIES, ctx.actor])
+        contained = await asyncio.to_thread(self._check_containment, tool)
         if contained is not None:
             return contained
         if not policy.allows_tool(tool):
@@ -271,7 +274,8 @@ class Firewall:
             if points > risk:
                 risk, layer = points, "intent_check"
                 why = "the intent check could not run" if intent.failed else "this action doesn't match your request"
-        if self.state.agent_frozen(ctx.agent) is None and scoring.SCANNER_FAILURE > risk:
+        frozen = await asyncio.to_thread(self.state.agent_frozen, ctx.agent)
+        if frozen is None and scoring.SCANNER_FAILURE > risk:
             risk, layer, why = scoring.SCANNER_FAILURE, "containment", "Kairos could not confirm the agent's status"
         if LEVEL_RANK[engine.score_to_level(risk)] < LEVEL_RANK[policy.requires_approval_at_level]:
             return None

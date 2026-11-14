@@ -97,6 +97,27 @@ class EntityStateReader:
             return EntityState(entity)
         return EntityState(entity, bool(rows[0].get("locked")), bool(rows[0].get("frozen")))
 
+    def prefetch(self, entities: list[str]) -> None:
+        """Load several entities in ONE query into the cache (blocking: call it via a worker thread)."""
+        now = time.monotonic()
+        wanted = [e for e in entities if not (e in self._cache and now - self._cache[e][0] < self.CACHE_SECONDS)]
+        if not wanted or self.db is None or callable(getattr(engine, "get_entity_state", None)):
+            return
+        try:
+            query = self.db.table("entity_state").select("entity,locked,frozen")
+            if not hasattr(query, "in_"):
+                return  # a client without in_(): fall back to per-entity lookups
+            rows = query.in_("entity", wanted).execute().data or []
+        except Exception as e:
+            logger.warning("firewall: entity_state prefetch failed (%s)", type(e).__name__)
+            for entity in wanted:
+                self._cache[entity] = (now, None)
+            return
+        found = {r.get("entity"): r for r in rows}
+        for entity in wanted:
+            r = found.get(entity) or {}
+            self._cache[entity] = (now, EntityState(entity, bool(r.get("locked")), bool(r.get("frozen"))))
+
     def agent_frozen(self, agent: str) -> bool | None:
         states = [self.get(e) for e in (agent, *GLOBAL_FREEZE_ENTITIES)]
         if any(s is not None and s.frozen for s in states):

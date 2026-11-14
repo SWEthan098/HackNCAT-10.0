@@ -90,9 +90,10 @@ def test_firewall_never_writes_entity_state():
                 def execute(self):
                     return type("R", (), {"data": []})()
 
-                def __getattr__(self, op):  # insert/update/upsert/delete
-                    spy.writes.append((name, op))
-                    raise AssertionError("firewall tried to write")
+                def __getattr__(self, op):
+                    if op in ("insert", "update", "upsert", "delete"):
+                        spy.writes.append((name, op))
+                    raise AttributeError(op)
 
             return Q()
 

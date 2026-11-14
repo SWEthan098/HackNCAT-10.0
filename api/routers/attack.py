@@ -13,6 +13,7 @@ Rate limits (slowapi's `limits` engine): per device and global -> 429 "The defen
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -118,6 +119,16 @@ def _first_reason(fw: Firewall, layer: str) -> str:
     return "Kairos stopped this attack."
 
 
+_pending: set[asyncio.Task] = set()  # keep references so background saves aren't garbage-collected
+
+
+def _save_in_background(db, row: dict) -> None:
+    """Write the attempt row off the response path: the judge gets their result without waiting."""
+    task = asyncio.get_running_loop().create_task(asyncio.to_thread(_save_attempt, db, row))
+    _pending.add(task)
+    task.add_done_callback(_pending.discard)
+
+
 def _save_attempt(db, row: dict) -> None:
     try:
         db.table("attempts").insert(row).execute()
@@ -170,7 +181,7 @@ async def attack(
             )
             scan = await screen.screen_request(body.message)
             if scan.failed or (scan.flagged and scan.detection.confidence >= BLOCK_AT_CONFIDENCE):
-                return _finish(db, body, nick, screen, None, started, scan_block=scan.failed)
+                return await _finish(db, body, nick, screen, None, started, scan_block=scan.failed)
             outcome = await run_agent(body.message, **common)
             _merge(outcome.firewall, screen)
         else:
@@ -189,7 +200,7 @@ async def attack(
             "The AI defenders are offline right now, so your attack was not tested. "
             "Nothing was blocked or allowed. Please try again in a minute.",
         ) from e
-    return _finish(db, body, nick, outcome.firewall, outcome, started)
+    return await _finish(db, body, nick, outcome.firewall, outcome, started)
 
 
 def _merge(into: Firewall | None, screen: Firewall) -> None:
@@ -202,7 +213,7 @@ def _merge(into: Firewall | None, screen: Firewall) -> None:
     into.ctx.max_risk = max(into.ctx.max_risk, screen.ctx.max_risk)
 
 
-def _finish(
+async def _finish(
     db,
     body: AttackRequest,
     nick: str,
@@ -247,7 +258,7 @@ def _finish(
         breach,
         (time.perf_counter() - started) * 1000,
     )
-    _save_attempt(
+    _save_in_background(
         db,
         {
             "nickname": nick,

@@ -25,13 +25,9 @@ from redteam import firewall_bridge
 from redteam.seed import (
     CFO_USERNAME,
     DOMAIN,
-    EXFIL_ADDRESS,
-    PAYROLL_PATH,
     TAKEOVER_USERNAME,
     check_password,
     get_account,
-    poisoned_email,
-    read_file,
 )
 from schemas.kairos import Event
 from sensors.comms_guard import get_message, handle_message
@@ -167,25 +163,29 @@ async def stage2_impersonation(mode: Mode, db: Any = None) -> StageResult:
 
 
 async def stage3_prompt_injection(mode: Mode, db: Any = None) -> StageResult:
-    email = poisoned_email()
+    email = firewall_bridge.planted(db)
     result = StageResult("prompt_injection", "blocked")
     log = result.log_lines
     log.append(f"[stage 3] prompt injection -> finance AI assistant ({email.to})")
     log.append(f'planted email {email.id}: "{email.subject}" with a hidden instruction')
-    log.append(f"hidden goal: send {PAYROLL_PATH} to {EXFIL_ADDRESS}")
+    log.append(f"hidden goal: send {email.path} to {email.exfil_address}")
     log.append("waiting for the assistant to read the inbox...")
 
     outcome = await firewall_bridge.run_stage3(mode, db)
-    if outcome.event is not None:
-        result.events.append(outcome.event)
+    # Routine allowed tool calls (risk 0) stay in the database; the chain keeps the ones that matter.
+    result.events += [e for e in outcome.events if e.risk > 0]
+    filename = email.path.rsplit("/", 1)[-1]
     if outcome.leaked:
-        records = max(0, len((read_file(PAYROLL_PATH) or "").strip().splitlines()) - 1)
-        log.append(f"assistant sent {PAYROLL_PATH.rsplit('/', 1)[-1]} to {EXFIL_ADDRESS}")
-        log.append(f"exfiltration: SUCCESS ({records} payroll records received)")
+        log.append(f"assistant sent {filename} to {email.exfil_address}")
+        log.append("exfiltration: SUCCESS (payroll records received)")
         result.outcome = "leaked"
-    else:
+    elif outcome.blocked:
         log.append("exfiltration attempt: ACCESS DENIED")
         log.append("nothing received")
+    else:
+        log.append("the assistant did not act on the hidden instruction")
+        log.append("nothing received")
+        result.outcome = "no_effect"
     return result
 
 

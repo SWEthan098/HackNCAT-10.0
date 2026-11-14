@@ -215,3 +215,38 @@ def test_rate_limiter_windows():
     assert limiter.check("c") == 0  # global window moved on
     now[0] = 11
     assert limiter.check("a") == 0
+
+
+# ---- public counter --------------------------------------------------------------------
+
+
+def test_picker_runs_reach_the_public_counter(fake_db):
+    run("password_guessing", {"speed": "fast", "accounts": 10}, db=fake_db)
+    run("fake_boss", {"pressure": "polite", "amount": 500}, "Agent <b>Hawk</b>", db=fake_db)
+    feed, attempts = fake_db.tables["public_feed"].rows, fake_db.tables["attempts"].rows
+    assert [(r["nickname"], r["attack_type"], r["verdict"]) for r in feed] == [
+        ("agent-falcon", "password_guessing", "blocked"),
+        ("agent-b-hawk-b", "fake_boss", "allowed"),
+    ]
+    assert feed[0]["technique"] == "Credential Stuffing" and attempts[0]["blocked_by"] == "login_guard"
+    assert not any(a["breach"] for a in attempts) and all(a["message"] is None for a in attempts)
+    assert "<" not in feed[1]["summary"]
+
+
+def test_full_attack_counts_each_step_once(fake_db):
+    run("full_attack", {"speed": "medium", "pressure": "urgent"}, db=fake_db)
+    kinds = [r["attack_type"] for r in fake_db.tables["public_feed"].rows]
+    assert kinds.count("password_guessing") == 1 and kinds.count("fake_boss") == 1
+    # The Trick the AI step is published by /attack itself, in a background thread that may still
+    # be running here, so only check that this module did not publish it a second time.
+    assert len(kinds) <= 3
+
+
+def test_a_broken_counter_never_changes_the_result(fake_db, monkeypatch):
+    def boom(*_a, **_k):
+        raise RuntimeError("feed down")
+
+    monkeypatch.setattr(playground.engine, "publish_attempt", boom)
+    result = run("fake_boss", {"pressure": "threatening"}, db=fake_db)
+    assert result.response_level == "blocked" and fake_db.tables["public_feed"].rows == []
+    assert run("password_guessing", {"sneaky": True}).response_level == "watched"  # no database: nothing published

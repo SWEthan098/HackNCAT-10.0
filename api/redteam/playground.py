@@ -18,7 +18,9 @@ Safety rails, all in code:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,6 +33,8 @@ from redteam.seed import COMMON_PASSWORDS, DOMAIN, EMPLOYEES, GUESTS, check_pass
 from schemas.kairos import Event, Level
 from sensors.comms_guard import handle_message
 from sensors.login_guard import handle_login
+
+logger = logging.getLogger("api.redteam")
 
 ATTACK_TYPES = ("password_guessing", "fake_boss", "trick_ai", "full_attack")
 
@@ -271,6 +275,40 @@ async def trick_ai(
     return LaunchResult(outcome, TRICK_RISK[key], level, log, [], {"agent_firewall"})
 
 
+# ---- public counter ----------------------------------------------------------------------
+
+_VERDICT_FOR = {"watched": "allowed", "slowed": "flagged", "challenged": "flagged", "blocked": "blocked"}
+
+
+def _publish_sync(db: Any, nickname: str, attack_type: str, result: LaunchResult) -> None:
+    technique = next((m.name for e in result.events if e is not None for m in e.mitre), None)
+    sensor = next(iter(result.sensors), None)
+    engine.publish_attempt(
+        db,
+        nickname=clean_nickname(nickname),
+        attack_type=attack_type,
+        verdict=_VERDICT_FOR[result.response_level],
+        blocked_by=sensor if result.response_level == "blocked" else None,
+        technique=technique,
+        breach=False,  # a guessed sandbox password is not a breach (no canary, no data left the company)
+        reason=result.outcome,  # built from code templates; never audience text
+    )
+
+
+async def publish(db: Any, nickname: str, attack_type: str, result: LaunchResult) -> None:
+    """Add this run to the public "N attacks, 0 breaches" counter (engine.publish_attempt).
+
+    Trick the AI is not published here: /attack already publishes its own attempt. The counter is
+    nice-to-have, so a failure is logged and never changes the result the visitor gets.
+    """
+    if db is None:
+        return
+    try:
+        await asyncio.to_thread(_publish_sync, db, nickname, attack_type, result)
+    except Exception as exc:
+        logger.warning("playground: could not publish attempt (%s)", type(exc).__name__)
+
+
 # ---- full attack + entry point -----------------------------------------------------------
 
 
@@ -287,6 +325,8 @@ async def full_attack(
         password_guessing(_sub(settings, "password_guessing"), actor, db),
         await fake_boss(_sub(settings, "fake_boss"), actor, db),
     ]
+    await publish(db, nickname, "password_guessing", parts[0])
+    await publish(db, nickname, "fake_boss", parts[1])
     try:
         parts.append(await trick_ai(_sub(settings, "trick_ai"), nickname, db, request))
     except (AppError, HTTPException) as exc:
@@ -318,8 +358,10 @@ async def launch(
     actor = actor_for(nickname)
     if attack_type == "password_guessing":
         result = password_guessing(settings, actor, db)
+        await publish(db, nickname, attack_type, result)
     elif attack_type == "fake_boss":
         result = await fake_boss(settings, actor, db)
+        await publish(db, nickname, attack_type, result)
     elif attack_type == "trick_ai":
         result = await trick_ai(settings, nickname, db, request)
     elif attack_type == "full_attack":

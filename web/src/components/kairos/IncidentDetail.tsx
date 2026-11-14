@@ -8,13 +8,13 @@
 // technique ids on fixed hosts.
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { Alert, Button, ErrorState, IconChevronRight, IconSpark, LoadingState, Modal, TextAreaField, cn } from "@/components/ui";
+import { Alert, Button, ErrorState, IconChevronRight, IconSpark, LoadingState, Modal, Spinner, TextAreaField, cn } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { chronological, killChain, scoreBreakdown } from "@/lib/incidents";
 import { ROUTES } from "@/lib/routes";
-import type { IncidentDetail, KairosEvent, Level, Sensor } from "@/lib/types/kairos";
+import type { AnalystAskResponse, IncidentDetail, KairosEvent, Level, Sensor } from "@/lib/types/kairos";
 import { AnalystAnswer } from "./AnalystAnswer";
 import { LEVEL_INK, LEVEL_LABELS, LEVEL_SIGNAL, LevelBadge } from "./LevelBadge";
 import { MitreChip } from "./MitreChip";
@@ -450,6 +450,12 @@ function FalsePositiveDialog({ open, incident, onClose, onDone }: { open: boolea
 
 // ---------------------------------------------------------------------------------------
 
+/**
+ * The auto-run summary call. "offline" = the AI analyst answered 503; "error" = anything else
+ * (locally the stub API 404s this path, which lands here and shows the calm Re-run row).
+ */
+type SummaryState = { phase: "idle" | "loading" | "offline" | "error" } | { phase: "done"; answer: string };
+
 export function IncidentDetailView({ id }: { id: string }) {
   const { api } = useAuth();
   const [incident, setIncident] = useState<IncidentDetail | null>(null);
@@ -466,6 +472,27 @@ export function IncidentDetailView({ id }: { id: string }) {
       .catch((e) => setError({ status: e instanceof ApiError ? e.status : 0, message: e instanceof ApiError ? e.message : String(e) }));
   }, [api, id]);
   useEffect(load, [load]);
+
+  // Auto-run the AI analyst summary once per incident when none is stored. The ref keeps
+  // Realtime refreshes / refetches from firing it again; Re-run goes through summarize() too.
+  const [summary, setSummary] = useState<SummaryState>({ phase: "idle" });
+  const summaryRequested = useRef(false);
+  const summarize = useCallback(() => {
+    setSummary({ phase: "loading" });
+    api<AnalystAskResponse>(`/analyst/incidents/${encodeURIComponent(id)}/summary`, { method: "POST" })
+      .then((res) => {
+        setSummary({ phase: "done", answer: res.answer });
+        // In non-demo mode the backend persists the summary and a triage_label; one refetch
+        // brings them onto the incident.
+        load();
+      })
+      .catch((e) => setSummary({ phase: e instanceof ApiError && e.status === 503 ? "offline" : "error" }));
+  }, [api, id, load]);
+  useEffect(() => {
+    if (!incident || incident.summary || summaryRequested.current) return;
+    summaryRequested.current = true;
+    summarize();
+  }, [incident, summarize]);
 
   const back = (
     <Link href={ROUTES.console} className="mb-4 inline-flex items-center gap-1 text-sm text-ink-2 no-underline hover:text-ink">
@@ -493,6 +520,9 @@ export function IncidentDetailView({ id }: { id: string }) {
       </>
     );
   }
+
+  // The stored summary wins once a refetch brings it in; until then the local answer shows.
+  const summaryText = incident.summary ?? (summary.phase === "done" ? summary.answer : null);
 
   const closed = CLOSED_STATUSES.has(incident.status);
   const awaiting = incident.status === "awaiting_approval";
@@ -566,12 +596,28 @@ export function IncidentDetailView({ id }: { id: string }) {
                 </span>
               )}
             </div>
-            {incident.summary ? (
-              <AnalystAnswer text={incident.summary} className="max-w-[75ch] text-[0.96875rem] leading-relaxed text-ink" />
-            ) : (
-              <p className="max-w-[75ch] text-[0.96875rem] leading-relaxed text-ink">
-                The analyst hasn&apos;t summarized this incident yet. The evidence below is complete without it.
+            {summaryText ? (
+              <AnalystAnswer text={summaryText} className="max-w-[75ch] text-[0.96875rem] leading-relaxed text-ink" />
+            ) : summary.phase === "loading" ? (
+              <p className="flex max-w-[75ch] items-center gap-2 text-[0.96875rem] leading-relaxed text-ink">
+                <Spinner size={16} className="text-accent" />
+                Analyst is reading the incident…
               </p>
+            ) : (
+              <>
+                <p className="max-w-[75ch] text-[0.96875rem] leading-relaxed text-ink">
+                  The analyst hasn&apos;t summarized this incident yet. The evidence below is complete without it.
+                  {summary.phase === "offline" && " The AI analyst is offline right now."}
+                  {summary.phase === "error" && " The automatic summary attempt failed."}
+                </p>
+                {summary.phase === "error" && (
+                  <div className="mt-2">
+                    <Button variant="secondary" size="sm" onClick={summarize}>
+                      Re-run
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
             <p className="mt-2 text-sm text-muted">Written by the AI analyst. It can explain and suggest; it can&apos;t act.</p>
           </section>

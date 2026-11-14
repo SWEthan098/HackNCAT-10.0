@@ -134,21 +134,41 @@ class Firewall:
         ctx.decisions.append(decision)
         return decision
 
-    def _attack_tags(self, *extra: str) -> list[MitreTag]:
+    def _attack_tags(self, *extra: str, hijack: bool = True) -> list[MitreTag]:
         keys = [*extra, "agent_tool_invocation"]
-        if self.ctx.untrusted_seen:
+        if hijack and self.ctx.untrusted_seen and self.ctx.requester_trusted:
             keys.insert(0, "prompt_injection_indirect")
         elif not self.ctx.requester_trusted:
             keys.insert(0, "prompt_injection_direct")
         return [tag(k) for k in dict.fromkeys(keys)]
 
-    def _hijack(self) -> bool:
-        return self.ctx.untrusted_seen or not self.ctx.requester_trusted
+    def _hijack(self, args: dict[str, Any] | None = None) -> bool:
+        """Was this blocked action driven by an attacker rather than by the human's own request?
 
-    def _block(self, tool: str, layer: str, reason: str, *, risk: int | None = None, extra: tuple = ()) -> Decision:
+        Yes when the requester is untrusted (/attack), an injection was flagged in this task, the
+        tool wasn't asked for but the agent had read untrusted content, or a recipient doesn't come
+        from the human's request."""
+        ctx = self.ctx
+        if not ctx.requester_trusted or ctx.injection:
+            return True
+        if args is None:
+            return ctx.untrusted_seen
+        return any(to not in ctx.scope.trusted_recipients for to in recipients(str(args.get("to", ""))))
+
+    def _block(
+        self,
+        tool: str,
+        layer: str,
+        reason: str,
+        *,
+        risk: int | None = None,
+        extra: tuple = (),
+        args: dict[str, Any] | None = None,
+    ) -> Decision:
+        hijack = self._hijack(args)
         if risk is None:
-            risk = scoring.BLOCKED_HIJACK if self._hijack() else scoring.POLICY_VIOLATION
-        return self._decide(tool, "blocked", layer, reason, risk, mitre=self._attack_tags(*extra))
+            risk = scoring.BLOCKED_HIJACK if hijack else scoring.POLICY_VIOLATION
+        return self._decide(tool, "blocked", layer, reason, risk, mitre=self._attack_tags(*extra, hijack=hijack))
 
     # ---------------------------------------------------------------- guard protocol
     async def before_tool(self, tool: str, args: dict[str, Any]) -> Decision:
@@ -277,7 +297,11 @@ class Firewall:
         for to in recipients(str(args.get("to", ""))):
             if not policy.domain_allowed(to):
                 return self._block(
-                    "send_email", "scope_policy", f"Email can only go to {domains}; '{to}' is outside.", extra=exfil
+                    "send_email",
+                    "scope_policy",
+                    f"Email can only go to {domains}; '{to}' is outside.",
+                    extra=exfil,
+                    args=args,
                 )
         for to in recipients(str(args.get("to", ""))):
             if to not in ctx.scope.trusted_recipients:

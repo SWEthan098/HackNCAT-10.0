@@ -39,7 +39,7 @@ logger = logging.getLogger("api.redteam")
 ATTACK_TYPES = ("password_guessing", "fake_boss", "trick_ai", "full_attack")
 
 MAX_TRIES = 200
-MAX_ACCOUNTS = 10
+MAX_ACCOUNTS = 30  # every guest account; the 200-try cap still bounds the run
 MAX_AMOUNT = 1_000_000
 MAX_MESSAGE_CHARS = 500
 MAX_LOG_LINES = 40

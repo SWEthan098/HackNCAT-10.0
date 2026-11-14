@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Request
 from auth import AuthUser, current_user
 from core.db import get_db
 from core.errors import AppError
-from detectors.login import FEATURE_KEYS
+from detectors.login import FEATURE_KEYS, PAGE_KEYS
 from schemas.kairos import LoginSignalRequest, MessageSignalRequest, SensorResponse
 from sensors.comms_guard import handle_message
 from sensors.login_guard import handle_login
@@ -45,7 +45,7 @@ def login_signal(body: LoginSignalRequest, request: Request, db=Depends(_login_d
         body.username, body.features, actor=_source_id(request), source="audience", db=db, record_low=False
     )
     # Key names and the outcome only: never the username, the values or anything typed.
-    known = sorted(k for k in body.features if k in FEATURE_KEYS)
+    known = sorted(k for k in body.features if k in FEATURE_KEYS or k in PAGE_KEYS)
     logger.info(
         "login signal keys=%s ignored_keys=%d risk=%d response=%s",
         ",".join(known) or "none",

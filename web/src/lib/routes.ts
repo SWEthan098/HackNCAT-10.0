@@ -55,16 +55,20 @@ export function safeNextPath(next: string | null | undefined, fallback: string =
 }
 
 // ---------------------------------------------------------------------------------------
-// Role split (requested by Miles): red_team accounts only get /redteam; everyone else gets
-// /console, /approve and the rest, but not /redteam. Roles come from public.user_roles (each
-// user can read only their own rows). This is a navigation layer: the data itself is still
-// protected by RLS and by the API's own role checks.
+// Role split (requested by Miles): red_team accounts only get /redteam, and approver-only
+// accounts only get /approve; everyone else gets /console, /approve and the rest, but not
+// /redteam. Roles come from public.user_roles (each user can read only their own rows).
+// This is a navigation layer: the data itself is still protected by RLS and by the API's
+// own role checks.
 // ---------------------------------------------------------------------------------------
 
 export type Role = "approver" | "red_team" | "analyst";
 
 /** Protected pages a red_team account may still open. */
 const RED_TEAM_ALLOWED = [ROUTES.redteam, ROUTES.resetPassword];
+
+/** Protected pages an approver-only account may still open. */
+const APPROVER_ALLOWED = [ROUTES.approve, ROUTES.resetPassword];
 
 const isUnder = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
 
@@ -79,6 +83,14 @@ export function homeFor(roles: readonly string[]): string {
 export function roleRedirect(pathname: string, roles: readonly string[]): string | null {
   if (roles.includes("red_team")) {
     if (isProtected(pathname) && !RED_TEAM_ALLOWED.some((p) => isUnder(pathname, p))) return ROUTES.redteam;
+    return null;
+  }
+  // Approver-only accounts are confined to /approve, same pattern as red_team above
+  // (red_team wins when both are held). user_roles allows approver+analyst on one account:
+  // we confine ONLY accounts whose sole guarded role is approver — an approver who is also
+  // an analyst keeps full console access, and /approve stays their home (homeFor).
+  if (roles.includes("approver") && !roles.includes("analyst")) {
+    if (isProtected(pathname) && !APPROVER_ALLOWED.some((p) => isUnder(pathname, p))) return ROUTES.approve;
     return null;
   }
   if (isUnder(pathname, ROUTES.redteam)) return ROUTES.console;

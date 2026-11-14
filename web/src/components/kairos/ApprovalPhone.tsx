@@ -13,6 +13,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { Alert, Button, EmptyState, IconAlert, IconCheck, IconPulse, LoadingState, cn } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { createAlarm, keepScreenOn, type Alarm, type WakeState } from "@/lib/approvalAlarm";
+import { canDecide, nextDeadline, shownStatus } from "@/lib/approvals";
 import { createClient } from "@/lib/supabase/client";
 import type { Approval } from "@/lib/types/kairos";
 
@@ -87,7 +88,20 @@ export function ApprovalPhoneView({
   const [busy, setBusy] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const pending = (approvals ?? []).filter((a) => a.status === "pending");
+  // One clock for the whole page (see lib/approvals.ts for the expiry rules). The server
+  // flips rows to "expired" lazily, so this re-renders exactly when the next pending
+  // deadline passes: that row flips to Expired, loses its buttons, and stops ringing,
+  // without a reload. No deadline in the future means no timer at all.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const at = nextDeadline(approvals ?? [], now);
+    if (at === null) return;
+    const t = setTimeout(() => setNow(Date.now()), Math.max(0, at - Date.now()) + 250);
+    return () => clearTimeout(t);
+  }, [approvals, now]);
+
+  // Rows past their deadline are not pending here: they never ring and get no buttons.
+  const pending = (approvals ?? []).filter((a) => canDecide(a, now));
   const ringing = baselineIds ? pending.find((a) => !baselineIds.has(a.id) && !acknowledged.has(a.id)) ?? null : null;
   const overlayOpen = testing || ringing !== null;
 
@@ -242,27 +256,42 @@ export function ApprovalPhoneView({
         ) : approvals.length === 0 ? (
           <EmptyState title="No requests yet" description="When Kairos needs a human decision, it appears here and this phone rings." />
         ) : (
-          approvals.map((a) => (
-            <article
-              key={a.id}
-              className={cn(
-                "rounded-card border p-4",
-                a.status === "pending" ? "border-error/60 border-l-4 border-l-level-critical bg-paper-2" : "border-rule bg-paper",
-              )}
-            >
-              <p className="mb-2 flex items-center justify-between gap-2 text-sm">
-                <span className={a.status === "pending" ? "font-semibold text-level-critical-ink" : "font-medium text-ink-2"}>
-                  {a.status === "pending" ? "Waiting for you" : a.status === "approved" ? "Approved" : a.status === "denied" ? "Denied" : "Expired"}
-                </span>
-                <span className="num font-mono text-[0.8125rem] text-muted">{clock(a.decided_at ?? a.created_at)}</span>
-              </p>
-              <p className={cn("whitespace-pre-line", a.status === "pending" ? "text-[1.0625rem] leading-relaxed text-ink" : "text-ink-2")}>{a.summary}</p>
-              {a.status === "pending" && <div className="mt-4">{decisionButtons(a, false)}</div>}
-              {a.status === "expired" && (
-                <p className="mt-2 text-sm text-ink-2">Nobody answered in time. Held actions stay held, and nobody was locked out.</p>
-              )}
-            </article>
-          ))
+          approvals.map((a) => {
+            // What the row *shows*: a pending row past its deadline reads as expired.
+            const status = shownStatus(a, now);
+            return (
+              <article
+                key={a.id}
+                className={cn(
+                  "rounded-card border p-4",
+                  status === "pending" ? "border-error/60 border-l-4 border-l-level-critical bg-paper-2" : "border-rule bg-paper",
+                )}
+              >
+                <p className="mb-2 flex items-center justify-between gap-2 text-sm">
+                  <span className={status === "pending" ? "font-semibold text-level-critical-ink" : "font-medium text-ink-2"}>
+                    {status === "pending" ? "Waiting for you" : status === "approved" ? "Approved" : status === "denied" ? "Denied" : "Expired"}
+                  </span>
+                  <span className="num font-mono text-[0.8125rem] text-muted">{clock(a.decided_at ?? a.created_at)}</span>
+                </p>
+                <p className={cn("whitespace-pre-line", status === "pending" ? "text-[1.0625rem] leading-relaxed text-ink" : "text-ink-2")}>{a.summary}</p>
+                {status === "pending" && <div className="mt-4">{decisionButtons(a, false)}</div>}
+                {status === "expired" && (
+                  // Unmissable at arm's length (same weight as the alarm view), sitting where
+                  // the buttons would be: nobody should try to decide a timed-out request.
+                  <div className="mt-4">
+                    <p className="text-[2rem] font-semibold leading-[1.1] text-ink">Expired</p>
+                    <p className="mt-2 text-lg leading-snug text-ink">Nobody answered in time.</p>
+                    <p className="mt-1 text-ink-2">Held actions stay held, and nobody was locked out.</p>
+                    {errors[a.id] && (
+                      <p role="alert" className="mt-2 text-sm font-medium text-error">
+                        {errors[a.id]}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })
         )}
       </section>
 

@@ -182,16 +182,18 @@ def test_endpoint_runs_the_chain_for_red_team_and_saves_the_events(client, fake_
     assert r.status_code == 200 and r.json()["outcome"] == "blocked"
     assert "exfiltration attempt: ACCESS DENIED" in r.json()["log_lines"]
     rows = fake_db.tables["events"].rows
-    assert [(e["sensor"], e["actor"], e["target"], e["source"], e["risk"]) for e in rows] == [
+    assert [(e["sensor"], e["actor"], e["target"], e["source"], e["risk"]) for e in rows[:3]] == [
         ("login_guard", "bot:203.0.113.7", "j.smith", "scripted", 45),
         ("comms_guard", "j.smith", "e.cruz", "scripted", 50),
         ("agent_firewall", "j.smith", "finance_agent", "scripted", 55),
     ]
     assert rows[0]["raw_features"]["failed_attempts"] == 8 and set(rows[0]["raw_features"]) <= set(FEATURE_KEYS)
-    assert len(fake_db.tables["audit_log"].rows) == 3  # the engine audits every recorded event
+    recorded = [a for a in fake_db.tables["audit_log"].rows if a["action"] == "event_recorded"]
+    assert len(recorded) == len(rows)  # the engine audits every recorded event
+    saved_before = len(rows)
 
     r = client.post("/redteam/run", json={"stage": "full_chain", "target": "unprotected"}, headers=headers)
-    assert r.json()["outcome"] == "leaked" and len(fake_db.tables["events"].rows) == 3  # nothing new recorded
+    assert r.json()["outcome"] == "leaked" and len(fake_db.tables["events"].rows) == saved_before  # nothing new
     bad = client.post("/redteam/run", json={"stage": "rm -rf", "target": "cisco.com"}, headers=headers)
     assert bad.status_code == 422
 

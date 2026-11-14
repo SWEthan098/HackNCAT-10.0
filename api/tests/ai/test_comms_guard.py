@@ -281,3 +281,11 @@ def test_recall_only_touches_the_incidents_own_actors_and_source(ledger):
     assert not comms_guard.get_message(scripted.message_id).held
     assert not comms_guard.get_message(other.message_id).held
     assert comms_guard.on_incident_escalated([], "critical") == []
+
+
+def test_recall_without_a_db_is_saved_where_the_message_was_recorded(ledger, fake_db):
+    """The engine's hook calls on_incident_escalated(events, level) with no database."""
+    medium = guard(FAKE_CFO_WIRE, db=fake_db)
+    held = comms_guard.on_incident_escalated([medium.event], "critical")
+    assert len(held) == 1
+    assert [e["action"] for e in fake_db.tables["events"].rows] == ["message_slowed", "message_recalled"]

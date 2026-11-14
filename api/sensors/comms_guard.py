@@ -29,7 +29,7 @@ import logging
 import uuid
 from collections import deque
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -92,6 +92,9 @@ class TrackedMessage:
     held: bool = False
     held_at: datetime | None = None
     recall_event: Event | None = None
+    # The database the original event was saved to, so a later recall is saved to the same place
+    # even when the engine's hook does not pass one.
+    db: Any = field(default=None, repr=False, compare=False)
 
 
 _delivered: deque[TrackedMessage] = deque(maxlen=MAX_TRACKED_MESSAGES)
@@ -185,6 +188,7 @@ async def handle_message(
                 risk=score.risk,
                 mitre=_mitre(score, sender, score.risk),
                 delivered_at=datetime.now(UTC),
+                db=db,
             )
         )
     return MessageResult(verdict, detection, score.risk, level, response, USER_MESSAGES[response], event, message_id)
@@ -208,7 +212,7 @@ def hold_flagged_messages(actors: Iterable[str], *, source: Source, db: Any = No
         message.held, message.held_at = True, datetime.now(UTC)
         held.append(message)
         message.recall_event = record(
-            db,
+            db if db is not None else message.db,
             sensor="comms_guard",
             actor=message.actor,
             target=message.recipient,
@@ -229,7 +233,7 @@ def hold_flagged_messages(actors: Iterable[str], *, source: Source, db: Any = No
 def on_incident_escalated(events: Iterable[Event], level: Level, db: Any = None) -> list[TrackedMessage]:
     """Hook for the engine: call when an incident's level changes. Acts only at Critical.
 
-    Pass the same `db` the engine is using so the recall events are saved alongside the incident.
+    `db` is optional: without it each recall is saved to the database its message was recorded in.
     """
     if level != RECALL_AT_LEVEL:
         return []

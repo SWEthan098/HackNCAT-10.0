@@ -12,7 +12,8 @@ Pure code, no AI. Looks at timing and metadata only, never anything a person typ
     accounts_from_source          how many different accounts one source tried
     success_after_failures        True if a login finally succeeded after the failures
 
-Any other key is dropped before scoring, so typed content can never reach this code.
+The login page's own `attempt_number` and `ms_page_to_submit` are also accepted and converted to
+the first two. Any other key is dropped before scoring, so typed content can never reach this code.
 
 Fairness: instant or perfectly even "typing" alone (password managers, paste, screen readers and
 other assistive tech) is NOT treated as a bot. It only adds real points next to volume signals.
@@ -33,6 +34,9 @@ FEATURE_KEYS: tuple[str, ...] = (
     "accounts_from_source",
     "success_after_failures",
 )
+
+# The two fields the login page sends today; used only to fill in when the six above are missing.
+PAGE_KEYS: tuple[str, ...] = ("attempt_number", "ms_page_to_submit")
 
 CREDENTIAL_STUFFING = "credential stuffing"
 ACCOUNT_TAKEOVER = "account takeover"
@@ -75,7 +79,32 @@ def clean_features(features: dict[str, Any] | None) -> dict[str, float | bool]:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value < 0:
             continue
         cleaned[key] = min(float(value), 1_000_000.0)
+    _from_page_fields(features or {}, cleaned)
     return cleaned
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or value < 0:
+        return None
+    return min(float(value), 1_000_000_000.0)
+
+
+def _from_page_fields(features: dict[str, Any], cleaned: dict[str, float | bool]) -> None:
+    """Fill gaps from the login page's own two fields (PAGE_KEYS), when the six keys are absent.
+
+    The page sends `attempt_number` (1st, 2nd, ... submit in this page view) and
+    `ms_page_to_submit` (time since the page loaded). Both are counts/timings, never typed
+    content. They give a partial signal: repeated failures and how fast they came. Typing
+    rhythm, accounts per source and "success after failures" are not derivable from them.
+    """
+    attempt = _number(features.get("attempt_number"))
+    if attempt is None or attempt < 1:
+        return
+    cleaned.setdefault("failed_attempts", attempt - 1)  # every submit before this one failed
+    elapsed_ms = _number(features.get("ms_page_to_submit"))
+    # Only from the 3rd submit on: one quick first try is just a fast (or autofilled) person.
+    if attempt >= 3 and elapsed_ms and "attempts_per_minute" not in cleaned:
+        cleaned["attempts_per_minute"] = min(attempt / elapsed_ms * 60_000, 1_000_000.0)
 
 
 def _tier(value: float, tiers: tuple[tuple[int, int], ...]) -> int:

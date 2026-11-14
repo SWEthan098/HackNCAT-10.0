@@ -94,8 +94,8 @@ def test_results_are_honest_about_a_weak_sandbox_password():
 def test_settings_are_capped():
     huge = run("password_guessing", {"speed": "fast", "accounts": 9999, "tries": 10**9})
     text = "\n".join(huge.log_lines)
-    assert "10 sandbox accounts" in text and f"{MAX_TRIES} guesses queued" in text
-    for accounts in range(1, 11):
+    assert "30 sandbox accounts" in text and "180 guesses queued" in text  # 6 each, under the 200 cap
+    for accounts in range(1, 31):
         for speed in ("slow", "medium", "fast"):
             line = run("password_guessing", {"speed": speed, "accounts": accounts}).log_lines[2]
             assert int(line.split()[0]) <= MAX_TRIES

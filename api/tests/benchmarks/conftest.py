@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
+from sensors import comms_guard
 from tests.benchmarks import report
+
+
+@pytest.fixture(autouse=True)
+def _clean_sensor_memory():
+    comms_guard.reset_messages()
+    yield
+    comms_guard.reset_messages()
 
 
 def pytest_terminal_summary(terminalreporter):

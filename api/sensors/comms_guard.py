@@ -38,6 +38,7 @@ from detectors.comms import AI_MANIPULATION, CommsScore, add_model_points, messa
 from redteam.seed.company import DOMAIN
 from schemas.kairos import Detection, Event, Level, MitreTag, Source, Verdict
 from schemas.mitre import tag
+from sensors import watch
 from sensors.events import record
 
 logger = logging.getLogger("api.sensors.comms_guard")
@@ -61,6 +62,10 @@ USER_MESSAGES: dict[Response, str] = {
 
 
 RECALL_AT_LEVEL: Level = "critical"
+HELD_UNDER_WATCH = (
+    "Held by rule: the sending account is under watch after a suspicious sign-in, "
+    "so its flagged messages wait for verification."
+)
 RECALL_NOTICE = "This message was pulled back and is on hold. Please verify the request with the sender another way."
 MAX_TRACKED_MESSAGES = 500
 
@@ -159,6 +164,12 @@ async def handle_message(
 
     level = engine.score_to_level(score.risk)
     response, verdict = LADDER[level]
+    # Fixed rule, separate from the score: a flagged message from an account under watch is held
+    # for verification instead of delivered with a warning. The score and level do not change.
+    under_watch = watch.watched_account(sender_entity, source=source, actor=actor or sender_entity)
+    if under_watch is not None and response == "slowed":
+        response = "challenged"
+        note = f"{note} {HELD_UNDER_WATCH}".strip()
     detection = to_detection(score, f"{note} Response: {response}.".strip())
 
     event = None
@@ -265,5 +276,6 @@ def release_message(message_id: str) -> bool:
 
 
 def reset_messages() -> None:
-    """Forget every tracked message (Reset demo)."""
+    """Forget every tracked message and every account under watch (Reset demo)."""
     _delivered.clear()
+    watch.reset()

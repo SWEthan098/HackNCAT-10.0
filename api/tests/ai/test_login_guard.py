@@ -202,3 +202,25 @@ def test_public_endpoint_scores_without_a_login(client):
     body = r.json()
     assert body["verdict"] == "blocked" and body["detection"]["flagged"] is True
     assert body["detection"]["technique"] == "credential stuffing"
+
+
+# ---- the login page's own two fields ---------------------------------------------------
+
+
+def test_login_page_fields_give_a_partial_signal():
+    # First submit, however fast: nothing (could be autofill).
+    assert login_risk({"attempt_number": 1, "ms_page_to_submit": 400}).risk == 0
+    # A person mistyping a few times over a minute stays Low.
+    assert login_risk({"attempt_number": 3, "ms_page_to_submit": 60_000}).risk < 30
+    # Twelve submits in 20 seconds: 11 failures at 36 a minute.
+    fast = login_risk({"attempt_number": 12, "ms_page_to_submit": 20_000})
+    assert fast.risk == 45 and fast.technique == "credential stuffing"
+    assert guard({"attempt_number": 60, "ms_page_to_submit": 30_000}).response == "challenged"
+
+
+def test_the_six_keys_win_over_the_page_fields_and_junk_is_ignored():
+    both = {**HUMAN, "attempt_number": 500, "ms_page_to_submit": 1}
+    assert login_risk(both).risk == login_risk(HUMAN).risk
+    for junk in ({"attempt_number": "12"}, {"attempt_number": -3}, {"attempt_number": True}, {"attempt_number": 0}):
+        assert login_risk(junk).risk == 0
+    assert set(clean_features({"attempt_number": 4, "ms_page_to_submit": 9_000, "password": "x"})) <= set(FEATURE_KEYS)

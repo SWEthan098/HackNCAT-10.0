@@ -123,6 +123,10 @@ def stage1_credential_stuffing(mode: Mode, db: Any = None) -> StageResult:
             log.append("ACCESS DENIED: sign-in paused by the defender")
             result.outcome = "blocked"
             return result
+        if guard.response == "challenged":
+            log.append("verification required before sign-in: ACCESS DENIED")
+            result.outcome = "challenged"
+            return result
         if guard.response != "watched":
             log.append("responses are getting slower (throttled?)")
 
@@ -154,7 +158,8 @@ async def stage2_impersonation(mode: Mode, db: Any = None) -> StageResult:
             result.outcome = "blocked"
             return result
         if guard.response == "challenged":
-            log.append("message accepted by the server, but no read receipt (held?)")
+            log.append("message accepted by the server...")
+            log.append("no delivery receipt: HELD (not in the inbox)")
             result.outcome = "message_held"
             return result
     log.append("message delivered")

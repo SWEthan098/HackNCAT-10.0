@@ -173,6 +173,10 @@ class PlaygroundLaunchResponse(BaseModel):
     response_level: Literal["watched", "slowed", "challenged", "blocked"]
 
 
+class FalsePositiveRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class AppealRequest(BaseModel):
     event_id: str | None = None
     incident_id: str | None = None

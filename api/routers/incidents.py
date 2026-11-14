@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from auth import AuthUser, current_user
 from core.errors import AppError
 from engine import incident_risk, score_to_level
-from schemas.kairos import Event, Incident, IncidentDetail
+from schemas.kairos import Approval, Event, FalsePositiveRequest, Incident, IncidentDetail
 from schemas.mitre import tag
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -86,6 +86,42 @@ def list_incidents(_: AuthUser = Depends(current_user)) -> list[Incident]:
 
 @router.get("/{incident_id}", response_model=IncidentDetail, summary="Incident with its linked events")
 def get_incident(incident_id: str, _: AuthUser = Depends(current_user)) -> IncidentDetail:
+    return _find(incident_id)
+
+
+def _find(incident_id: str) -> IncidentDetail:
     if incident_id != _DEMO.id:
         raise AppError(404, "incident_not_found", "No incident with that id")
     return _DEMO
+
+
+@router.post(
+    "/{incident_id}/containment",
+    response_model=Approval,
+    summary="Request containment: creates a pending approval for a human to decide",
+)
+def request_containment(incident_id: str, _: AuthUser = Depends(current_user)) -> Approval:
+    """STUB in the final shape: nothing is saved yet. TODO(Daylen, step 9): create the real approval.
+
+    Requesting containment never locks anything by itself; it only asks an approver.
+    """
+    incident = _find(incident_id)
+    return Approval(
+        id="apr-demo",
+        incident_id=incident.id,
+        status="pending",
+        # Built from code facts only, never from attacker text.
+        summary=f"Containment requested for a {incident.level} incident (risk {incident.risk}). Stub: not saved.",
+        created_at=datetime.now(UTC),
+    )
+
+
+@router.post(
+    "/{incident_id}/false-positive",
+    response_model=Incident,
+    summary="Mark an incident as a false positive",
+)
+def mark_false_positive(incident_id: str, body: FalsePositiveRequest, _: AuthUser = Depends(current_user)) -> Incident:
+    """STUB in the final shape: nothing is saved yet. TODO(Daylen, step 8): update the incident + audit log."""
+    incident = _find(incident_id)
+    return Incident(**incident.model_dump(exclude={"events"}) | {"status": "false_positive"})

@@ -18,6 +18,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.config import get_settings
+from core.db import get_db
+from core.errors import AppError
 
 AUDIENCE = "authenticated"
 bearer = HTTPBearer(auto_error=False, description="Supabase access token")
@@ -71,3 +73,33 @@ def current_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -
     if not sub:
         raise _unauthorized("Invalid token")
     return AuthUser(id=sub, email=claims.get("email"), role=claims.get("role"), claims=claims)
+
+
+def has_role(db, user_id: str, role: str) -> bool:
+    """True if `user_roles` has (user_id, role). Reads with the service-role client."""
+    rows = db.table("user_roles").select("role").eq("user_id", user_id).eq("role", role).limit(1).execute().data
+    return bool(rows)
+
+
+def require_role(role: str):
+    """FastAPI dependency factory: a signed-in user who also holds `role` (approver, red_team, analyst).
+
+        def run(user: AuthUser = Depends(require_role("red_team"))): ...
+
+    401 without a valid token, 403 without the role. Fails closed: if the role lookup itself
+    breaks, the request is refused.
+    """
+
+    def dependency(user: AuthUser = Depends(current_user), db=Depends(get_db)) -> AuthUser:
+        try:
+            allowed = has_role(db, user.id, role)
+        except AppError:
+            raise
+        except Exception:
+            logger.exception("Role lookup failed; refusing request")
+            raise AppError(503, "role_check_unavailable", "Could not check your role. Try again.") from None
+        if not allowed:
+            raise AppError(403, "forbidden", f"This action needs the '{role}' role")
+        return user
+
+    return dependency

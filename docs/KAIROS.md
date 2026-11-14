@@ -4,12 +4,15 @@ Kairos (Cisco track) watches a fictional company ("Cisco" on the fake domain `ci
 three listeners, scores every event 0-100 in code, connects related events into incidents, stops
 dangerous AI actions automatically, and asks a human to approve anything disruptive.
 Full plan: the team Notion page. This file is the source of truth for **who edits what**.
+Using Claude Code? It auto-loads [CLAUDE.md](../CLAUDE.md); start by telling it who you are
+("I'm Miles, P2").
 
 ## Who owns what (only the owner edits these)
 
 ```
 kairos/ (repo root)
-  .github/ (CI, CODEOWNERS), .gitattributes, .gitignore, README.md   Daylen
+  .github/ (CI, CODEOWNERS), .gitattributes, .gitignore, README.md,
+  CLAUDE.md, AGENTS.md                                               Daylen
   supabase/migrations/                                               Daylen (only Daylen)
   scripts/attack_chain/                                              Miles
   api/

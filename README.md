@@ -1,6 +1,7 @@
 # HackNCAT 10.0: Kairos (Cisco track)
 
-> **Team, start here: [docs/KAIROS.md](docs/KAIROS.md)** has who owns which folder, the API
+> **Team, start here: [docs/KAIROS.md](docs/KAIROS.md)** (Claude Code reads [CLAUDE.md](CLAUDE.md)
+> automatically: open it and say who you are, e.g. "I'm Jordan, P4") has who owns which folder, the API
 > contract, the no-merge-conflict rules and the git routine. Kairos watches a fictional company
 > ("Cisco" on `cisco.example`), connects attacks into incidents, stops dangerous AI actions, and
 > keeps humans in charge. *Fictional demo environment. Not affiliated with or endorsed by Cisco.*

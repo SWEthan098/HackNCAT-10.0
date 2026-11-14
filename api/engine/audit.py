@@ -11,12 +11,31 @@ from __future__ import annotations
 
 from typing import Any
 
+from schemas.kairos import AuditVerifyResponse
+
+
+def _one(data):
+    if isinstance(data, list):
+        return data[0] if data else None
+    return data
+
 
 def write_audit(db, *, actor: str, action: str, detail: dict[str, Any] | None = None) -> dict:
     """Append one audit entry and return the stored row (id, hash, prev_hash, ...)."""
-    data = db.rpc("audit_append", {"p_actor": actor, "p_action": action, "p_detail": detail or {}}).execute().data
-    if isinstance(data, list):
-        data = data[0] if data else None
-    if not data:
+    row = _one(db.rpc("audit_append", {"p_actor": actor, "p_action": action, "p_detail": detail or {}}).execute().data)
+    if not row:
         raise RuntimeError("audit_append returned no row")
-    return data
+    return row
+
+
+def verify_audit(db) -> AuditVerifyResponse:
+    """Re-walk the whole chain in the database. ok=False names the first row that does not match."""
+    row = _one(db.rpc("audit_verify", {}).execute().data)
+    if not row:
+        raise RuntimeError("audit_verify returned no row")
+    bad = row.get("first_bad_id")
+    return AuditVerifyResponse(
+        ok=bool(row["ok"]),
+        entries_checked=int(row["entries_checked"]),
+        first_bad_entry=None if bad is None else str(bad),
+    )

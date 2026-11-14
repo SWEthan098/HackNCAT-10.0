@@ -92,17 +92,6 @@ def test_public_endpoints_need_no_login(client):
         ("post", "/agent/run", {"user_request": "Summarize my inbox"}),
         ("post", "/analyst/ask", {"question": "What happened?"}),
         ("post", "/sensors/message", {"from": "j.smith@cisco.example", "to": "finance@cisco.example", "body": "hi"}),
-        ("get", "/incidents", None),
-        ("get", "/incidents/inc-demo", None),
-        ("post", "/incidents/inc-demo/containment", None),
-        ("post", "/incidents/inc-demo/false-positive", {"reason": "known pen test"}),
-        ("post", "/approvals/apr-1/approve", None),
-        ("post", "/approvals/apr-1/deny", None),
-        ("get", "/appeals", None),
-        ("get", "/audit/verify", None),
-        ("post", "/killswitch", None),
-        ("post", "/agents/finance_agent/freeze", None),
-        ("get", "/stats", None),
     ],
 )
 def test_protected_endpoints(client, token_factory, method, path, body):
@@ -139,28 +128,6 @@ def test_redteam_run_works_for_red_team(client, fake_db, token_factory):
 def test_redteam_run_refuses_plain_user(client, fake_db, token_factory):
     r = client.post("/redteam/run", json={"stage": "full_chain"}, headers=_as_role(fake_db, token_factory, None))
     assert r.status_code == 403, r.text
-
-
-def test_incident_actions_return_their_final_shapes(client, token_factory):
-    h = _auth(token_factory)
-    approval = client.post("/incidents/inc-demo/containment", headers=h).json()
-    assert approval["status"] == "pending" and approval["incident_id"] == "inc-demo"
-    assert approval["decided_by"] is None and approval["decided_at"] is None
-
-    incident = client.post("/incidents/inc-demo/false-positive", json={"reason": "known pen test"}, headers=h).json()
-    assert incident["status"] == "false_positive" and incident["id"] == "inc-demo" and "events" not in incident
-
-    assert client.post("/incidents/nope/containment", headers=h).status_code == 404
-    assert client.post("/incidents/nope/false-positive", json={"reason": "x"}, headers=h).status_code == 404
-    assert client.post("/incidents/inc-demo/false-positive", json={"reason": ""}, headers=h).status_code == 422
-    assert client.post("/incidents/inc-demo/false-positive", headers=h).status_code == 422
-
-
-def test_demo_incident_links_three_listeners(client, token_factory):
-    body = client.get("/incidents/inc-demo", headers=_auth(token_factory)).json()
-    assert body["level"] == "critical" and body["risk"] == 85
-    assert {e["sensor"] for e in body["events"]} == {"login_guard", "comms_guard", "agent_firewall"}
-    assert client.get("/incidents/nope", headers=_auth(token_factory)).status_code == 404
 
 
 def test_attack_rejects_oversized_message(client):

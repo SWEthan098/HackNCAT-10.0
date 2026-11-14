@@ -58,6 +58,39 @@ Shapes: `api/schemas/kairos.py` (Python) = `web/src/lib/types/kairos.ts` (TypeSc
 Public (no login): `POST /attack`, `POST /playground/launch`, `POST /sensors/login`, `POST /appeals`.
 Everything else needs `Authorization: Bearer <Supabase access token>`. Swagger: http://localhost:8000/docs
 
+## Using the engine (what teammates import from Daylen's `api/engine/`)
+
+```python
+from fastapi import Depends
+from core.db import get_db
+from auth import AuthUser, require_role          # Depends(require_role("red_team")) / ("approver")
+import engine
+
+# In a router, always pass db=Depends(get_db) so tests use the in-memory database.
+event = engine.record_event(sensor="login_guard", actor="bot:203.0.113.7", target="j.smith",
+                            source="scripted", action="...", risk=45, verdict="flagged", reason="...",
+                            mitre=[tag("credential_stuffing")], raw_features={...}, db=db)
+event.incident_id                       # set when correlation linked it into an incident
+
+engine.is_locked(db, "j.smith")         # Login Guard: True -> answer engine.ACCOUNT_LOCKED_MESSAGE
+engine.is_frozen(db, "finance_agent")   # Agent Firewall: True -> refuse every tool call (kill switch counts)
+engine.publish_attempt(db, nickname=..., attack_type=..., verdict=..., technique=..., breach=False,
+                       message=...)     # /attack and /playground: attempts row + sanitized public_feed row
+engine.set_incident_summary(db, incident_id, summary=..., triage_label=...)   # AI analyst: explain only
+engine.create_approval(db, incident_id, requested_by="analyst")               # analyst's propose_response
+```
+
+- `record_event` is the only writer of `events`. It sets the level from the score, appends the audit
+  entry and runs correlation. `raw_features` is for login timing only and is deleted after 24 hours.
+- A Critical **scripted** incident creates a phone approval by itself. Audience incidents never page the
+  approver automatically; Request Containment still works on them.
+- `breach=True` on `publish_attempt` is what `GET /stats` counts as a breach. The firewall decides it.
+- Endpoints added after the scaffold: `POST /incidents/{id}/containment` (returns the pending
+  `Approval`), `POST /incidents/{id}/false-positive` with `{reason}` (returns the `Incident`),
+  `GET /incidents?source=scripted|audience`, `GET /appeals?incident_id=...`.
+  `FalsePositiveRequest = { reason: string }` needs its mirror in `web/src/lib/types/kairos.ts`.
+- `inc-demo` no longer exists: incidents come from the database. Run the chain to get one.
+
 ## Rules that keep us conflict-free
 
 1. Only edit files in your own folders. Not even a typo fix elsewhere: ask the owner.

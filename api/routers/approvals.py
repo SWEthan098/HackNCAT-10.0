@@ -1,35 +1,35 @@
-"""Human approvals. OWNER: Daylen (P3). Bearer auth (TODO: approver role, still pending, audit log)."""
+"""Human approvals. OWNER: Daylen (P3). Approver role only.
+
+Checked on every call: valid login, `approver` role, approval still pending and not timed out.
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Depends
 
-from auth import AuthUser, current_user
+import engine
+from auth import AuthUser, require_role
+from core.db import get_db
+from core.errors import AppError
+from engine.util import is_uuid
 from schemas.kairos import Approval
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 
 
-def _stub(approval_id: str, status: str, user: AuthUser) -> Approval:
-    now = datetime.now(UTC)
-    return Approval(
-        id=approval_id,
-        incident_id="inc-demo",
-        status=status,
-        summary="stub approval",
-        decided_by=user.id,
-        decided_at=now,
-        created_at=now,
-    )
+def _decide(db, approval_id: str, user: AuthUser, approve: bool) -> Approval:
+    if not is_uuid(approval_id):
+        raise AppError(404, "approval_not_found", "No approval with that id")
+    return Approval(**engine.decide_approval(db, approval_id, user_id=user.id, approve=approve))
 
 
 @router.post("/{approval_id}/approve", response_model=Approval, summary="Approve containment")
-def approve(approval_id: str, user: AuthUser = Depends(current_user)) -> Approval:
-    return _stub(approval_id, "approved", user)
+def approve(approval_id: str, user: AuthUser = Depends(require_role("approver")), db=Depends(get_db)) -> Approval:
+    """Carries out the listed actions (lock, revoke, freeze) and marks the incident contained."""
+    return _decide(db, approval_id, user, True)
 
 
 @router.post("/{approval_id}/deny", response_model=Approval, summary="Deny containment")
-def deny(approval_id: str, user: AuthUser = Depends(current_user)) -> Approval:
-    return _stub(approval_id, "denied", user)
+def deny(approval_id: str, user: AuthUser = Depends(require_role("approver")), db=Depends(get_db)) -> Approval:
+    """Nothing is locked; the incident goes back to the analyst."""
+    return _decide(db, approval_id, user, False)

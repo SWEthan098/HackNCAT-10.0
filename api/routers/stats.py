@@ -1,21 +1,20 @@
-"""Scoreboard / KPI strip numbers. OWNER: Daylen (P3). STUB."""
+"""KPI strip numbers. OWNER: Daylen (P3). Counted from the database on every call."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+import engine
 from auth import AuthUser, current_user
+from core.db import get_db
+from engine.feed import maybe_purge
 from schemas.kairos import Stats
 
 router = APIRouter(tags=["stats"])
 
 
 @router.get("/stats", response_model=Stats, summary="KPI numbers")
-def stats(_: AuthUser = Depends(current_user)) -> Stats:
-    return Stats(
-        attacks_blocked=0,
-        breaches=0,
-        false_positives=0,
-        avg_decision_ms=0.0,
-        open_incidents={"low": 0, "medium": 0, "high": 0, "critical": 1},
-    )
+def stats(_: AuthUser = Depends(current_user), db=Depends(get_db)) -> Stats:
+    engine.expire_stale_approvals(db)  # timed-out approvals close even if nobody taps them
+    maybe_purge(db)  # 24h clean-up of raw login data
+    return engine.get_stats(db)

@@ -6,6 +6,8 @@
 
 Order of checks on a tool call (first failure wins, every decision is recorded):
   policy (tool on the agent's list) -> scoped permissions (task grants the tool) -> path allowlist
+  -> send_email: domain allowlist (@cisco.example only) -> taint (recipient and sensitive data must
+     trace back to the human's request, never to content the agent read)
 Hard rules never depend on an AI detector being right.
 """
 
@@ -19,6 +21,7 @@ from firewall import scoring
 from firewall.integrations import EntityStateReader, record
 from firewall.policy import AgentPolicy, PolicyError, get_policy
 from firewall.scope import Scope, derive_scope
+from firewall.taint import TaintTracker, labels_requested, recipients
 from schemas.kairos import Decision, Event, MitreTag, Source, Verdict
 from schemas.mitre import tag
 
@@ -42,6 +45,7 @@ class TaskContext:
     events: list[Event] = field(default_factory=list)
     blocked_layers: list[str] = field(default_factory=list)
     untrusted_seen: bool = False
+    taint: TaintTracker = field(default_factory=TaintTracker)
     max_risk: int = 0
     policy_error: str | None = None
 
@@ -151,7 +155,44 @@ class Firewall:
             )
         if tool == "read_file" and not policy.path_allowed(str(args.get("path", ""))):
             return self._block(tool, "scope_policy", "That file is outside the folders this agent may read.")
+        if tool == "send_email":
+            blocked = self._check_send(args)
+            if blocked is not None:
+                return blocked
         return self._allow(tool)
+
+    def _check_send(self, args: dict[str, Any]) -> Decision | None:
+        ctx, policy = self.ctx, self.ctx.policy
+        body = str(args.get("subject", "")) + "\n" + str(args.get("body", ""))
+        leaked = ctx.taint.sensitive_labels_in(body)
+        exfil = ("llm_data_leakage",) if leaked else ()
+        domains = ", ".join("@" + d for d in policy.send_email.allowed_domains)
+        for to in recipients(str(args.get("to", ""))):
+            if not policy.domain_allowed(to):
+                return self._block(
+                    "send_email", "scope_policy", f"Email can only go to {domains}; '{to}' is outside.", extra=exfil
+                )
+        for to in recipients(str(args.get("to", ""))):
+            if to not in ctx.scope.trusted_recipients:
+                origin = ctx.taint.origin_of(to)
+                where = f"untrusted content ({origin})" if origin else "the AI, not from your request"
+                return self._block(
+                    "send_email",
+                    "taint_tracking",
+                    f"The recipient '{to}' came from {where}. Only addresses you typed can receive email.",
+                    risk=scoring.BLOCKED_HIJACK,
+                    extra=exfil,
+                )
+        unrequested = leaked - labels_requested(ctx.user_request)
+        if unrequested:
+            return self._block(
+                "send_email",
+                "taint_tracking",
+                f"This email contains {', '.join(sorted(unrequested))} data your request never asked to send.",
+                risk=scoring.BLOCKED_HIJACK,
+                extra=exfil,
+            )
+        return None
 
     def _allow(self, tool: str) -> Decision:
         sensitive = self.ctx.policy is not None and self.ctx.policy.is_sensitive(tool)
@@ -162,6 +203,7 @@ class Firewall:
         if not result.untrusted:
             return result.content
         self.ctx.untrusted_seen = True
+        self.ctx.taint.add(result.origin, result.content, result.labels)
         return f"<<UNTRUSTED {result.origin}>>\n{result.content}\n<<END UNTRUSTED>>"
 
     async def filter_output(self, text: str) -> str:

@@ -45,22 +45,35 @@ def get_incident(db, incident_id: str) -> IncidentDetail:
     return IncidentDetail(**row, event_ids=[e["id"] for e in events], events=[Event(**e) for e in events])
 
 
-def mark_false_positive(db, incident_id: str, *, reason: str, user_id: str) -> Incident:
-    """An analyst says this was not an attack. Feeds the false-positive number on the KPI strip."""
+def close_as_false_positive(
+    db, incident_id: str, *, by: str, reason: str | None = None, approval_id: str | None = None
+) -> Incident:
+    """Close the incident as not an attack. Feeds the false-positive number on the KPI strip.
+
+    The step itself, with no permission checks: engine.false_positive decides whether it may
+    happen now (Low/Medium) or needs an approver first (High/Critical). Every other pending
+    approval for the incident is cancelled, since a false alarm must not stay tappable.
+    """
     row = _row(db, incident_id)
     if row["status"] == "contained":
         raise AppError(409, "incident_contained", "This incident was already contained by an approver")
     db.table("incidents").update({"status": "false_positive"}).eq("id", incident_id).execute()
-    # A pending phone approval for a false alarm must not stay tappable.
-    db.table("approvals").update({"status": "denied"}).eq("incident_id", incident_id).eq("status", "pending").execute()
-    write_audit(
-        db,
-        actor=f"user:{user_id}",
-        action="incident_false_positive",
-        detail={"incident_id": incident_id, "reason": reason[:500]},  # typed by a signed-in analyst
-    )
-    detail = get_incident(db, incident_id)
-    return Incident(**detail.model_dump(exclude={"events"}))
+    cancelled = (
+        db.table("approvals")
+        .update({"status": "denied"})
+        .eq("incident_id", incident_id)
+        .eq("status", "pending")
+        .execute()
+    ).data or []
+    detail: dict = {"incident_id": incident_id}
+    if reason:
+        detail["reason"] = reason[:500]  # typed by a signed-in analyst
+    if approval_id:
+        detail["approval_id"] = approval_id
+    if cancelled:
+        detail["cancelled_approvals"] = [a["id"] for a in cancelled]
+    write_audit(db, actor=by, action="incident_false_positive", detail=detail)
+    return Incident(**get_incident(db, incident_id).model_dump(exclude={"events"}))
 
 
 def set_incident_summary(db, incident_id: str, *, summary: str | None = None, triage_label: str | None = None) -> None:

@@ -23,6 +23,11 @@ from .helpers import full_chain, judge_attack, rows, stage1, stage2
 APPROVER = "11111111-1111-1111-1111-111111111111"
 
 
+def _row(fake_db, approval: dict) -> dict:
+    """The stored approval row (insert returns a copy)."""
+    return next(a for a in rows(fake_db, "approvals") if a["id"] == approval["id"])
+
+
 def _pending(fake_db) -> dict:
     return next(a for a in rows(fake_db, "approvals") if a["status"] == "pending")
 
@@ -128,14 +133,75 @@ def test_expiry_sweep_and_asking_again(fake_db):
     assert second["id"] != first["id"] and second["status"] == "pending"
 
 
-def test_false_positive_cancels_the_pending_approval(fake_db):
+def test_critical_false_positive_is_only_a_request_until_an_approver_confirms(fake_db):
     full_chain(fake_db)
     incident_id = rows(fake_db, "incidents")[0]["id"]
-    incident = mark_false_positive(fake_db, incident_id, reason="planned pen test", user_id=APPROVER)
-    assert incident.status == "false_positive"
-    assert [a["status"] for a in rows(fake_db, "approvals")] == ["denied"]
+    containment = _pending(fake_db)
+    incident, request = mark_false_positive(fake_db, incident_id, reason="planned pen test", user_id="analyst-1")
+    assert incident.status == "awaiting_approval" and request["kind"] == "false_positive"
+    assert containment["status"] == "pending"  # still tappable
+    again, same = mark_false_positive(fake_db, incident_id, reason="again", user_id="analyst-1")
+    assert same["id"] == request["id"]  # asking twice: one request
+
+    decide_approval(fake_db, request["id"], user_id=APPROVER, approve=True)
+    assert rows(fake_db, "incidents")[0]["status"] == "false_positive"
+    assert containment["status"] == "denied" and rows(fake_db, "entity_state") == []
     with pytest.raises(AppError):
         create_approval(fake_db, incident_id)
+    actions = [a["action"] for a in rows(fake_db, "audit_log")]
+    assert actions[-3:] == ["false_positive_requested", "approval_approved", "incident_false_positive"]
+
+
+def test_denied_or_unanswered_false_positive_changes_nothing(fake_db):
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    _, request = mark_false_positive(fake_db, incident_id, reason="x", user_id="analyst-1")
+    decide_approval(fake_db, request["id"], user_id=APPROVER, approve=False)
+    assert rows(fake_db, "incidents")[0]["status"] == "awaiting_approval"
+    assert _pending(fake_db)["kind"] == "containment"
+
+    _, second = mark_false_positive(fake_db, incident_id, reason="x", user_id="analyst-1")
+    second = _row(fake_db, second)
+    second["expires_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    expire_stale_approvals(fake_db)
+    assert second["status"] == "expired"
+    assert rows(fake_db, "incidents")[0]["status"] == "awaiting_approval"  # containment still waiting
+
+
+def test_approving_containment_cancels_a_waiting_false_positive(fake_db):
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    containment = _pending(fake_db)
+    _, request = mark_false_positive(fake_db, incident_id, reason="x", user_id="analyst-1")
+    decide_approval(fake_db, containment["id"], user_id=APPROVER, approve=True)
+    assert rows(fake_db, "incidents")[0]["status"] == "contained" and _row(fake_db, request)["status"] == "denied"
+    with pytest.raises(AppError):
+        decide_approval(fake_db, request["id"], user_id=APPROVER, approve=True)
+
+
+def test_false_positive_two_person_and_conflict_rules(fake_db):
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    with pytest.raises(AppError) as err:
+        mark_false_positive(fake_db, incident_id, reason="x", user_id="u1", identities={"j.smith"})
+    assert err.value.status_code == 403
+    _, request = mark_false_positive(fake_db, incident_id, reason="x", user_id=APPROVER)
+    with pytest.raises(AppError) as err:
+        decide_approval(fake_db, request["id"], user_id=APPROVER, approve=True)
+    assert err.value.status_code == 403 and _row(fake_db, request)["status"] == "pending"
+    with pytest.raises(AppError):
+        decide_approval(fake_db, request["id"], user_id="other", approve=True, identities={"finance_agent"})
+    assert rows(fake_db, "incidents")[0]["status"] == "awaiting_approval"
+
+
+def test_low_or_medium_false_positive_closes_at_once(fake_db):
+    stage1(fake_db, risk=20)
+    stage1(fake_db, sensor="comms_guard", risk=20)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    incident, request = mark_false_positive(fake_db, incident_id, reason="known scanner", user_id="analyst-1")
+    assert incident.status == "false_positive" and request is None
+    with pytest.raises(AppError):
+        mark_false_positive(fake_db, incident_id, reason="again", user_id="analyst-1")
 
 
 def test_kill_switch_freezes_every_agent(fake_db):

@@ -23,8 +23,9 @@ from engine.approvals import APPROVAL_TIMEOUT_SECONDS, create_approval, decide_a
 from engine.audit import verify_audit, write_audit
 from engine.containment import ACCOUNT_LOCKED_MESSAGE, freeze_agent, is_frozen, is_locked, kill_switch
 from engine.correlation import correlate
+from engine.false_positive import mark_false_positive
 from engine.feed import maybe_purge, publish_attempt, purge_raw_login_data, sanitize_text
-from engine.incidents import get_incident, list_incidents, mark_false_positive, set_incident_summary
+from engine.incidents import get_incident, list_incidents, set_incident_summary
 from engine.reset import reset_demo
 from engine.scoring import EXTRA_SENSOR_BONUS, LEVEL_THRESHOLDS, clamp_risk, incident_risk, risk_math, score_to_level
 from engine.stats import get_stats

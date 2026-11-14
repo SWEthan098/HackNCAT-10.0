@@ -1,7 +1,7 @@
 // Pure helpers for the incident queue (no React, no browser: unit-testable).
 // OWNER: Jordan (P4).
 
-import type { Incident, Source } from "@/lib/types/kairos";
+import type { Incident, KairosEvent, MitreTag, Sensor, Source } from "@/lib/types/kairos";
 
 /** Queue order: highest risk first, newest first on ties. */
 export function sortIncidents(list: Incident[]): Incident[] {
@@ -74,3 +74,102 @@ export const STATUS_LABELS: Record<Incident["status"], string> = {
   closed: "Closed",
   false_positive: "False positive",
 };
+
+// ---------------------------------------------------------------------------------------
+// Incident detail (checklist step 7)
+// ---------------------------------------------------------------------------------------
+
+
+/** Mirror of engine.EXTRA_SENSOR_BONUS. Display only: the API's incident.risk is the truth. */
+export const EXTRA_LISTENER_BONUS = 15;
+
+export type ScoreBreakdown = {
+  /** The highest-scoring event, which sets the base. */
+  base: { eventId: string; risk: number } | null;
+  /** Distinct listeners involved, in first-seen order. */
+  sensors: Sensor[];
+  bonus: number;
+  /** base + bonus, capped at 100. */
+  total: number;
+  capped: boolean;
+};
+
+/**
+ * Re-derives the published formula (highest event + 15 per extra listener, max 100) so the
+ * screen can SHOW the math. It never replaces the server's score: the page compares the two
+ * and says so if they differ.
+ */
+export function scoreBreakdown(events: KairosEvent[]): ScoreBreakdown {
+  if (events.length === 0) return { base: null, sensors: [], bonus: 0, total: 0, capped: false };
+  const top = events.reduce((a, b) => (b.risk > a.risk ? b : a));
+  const sensors = [...new Set(events.map((e) => e.sensor))];
+  const bonus = EXTRA_LISTENER_BONUS * Math.max(0, sensors.length - 1);
+  const raw = top.risk + bonus;
+  return { base: { eventId: top.id, risk: top.risk }, sensors, bonus, total: Math.min(100, raw), capped: raw > 100 };
+}
+
+/** Mirror of TACTIC_ORDER in api/schemas/mitre.py (kill-chain order). */
+export const TACTIC_ORDER = [
+  "Credential Access",
+  "Initial Access",
+  "Lateral Movement",
+  "Defense Evasion",
+  "Execution",
+  "Privilege Escalation",
+  "Exfiltration",
+  "Impact",
+];
+
+export type KillChainStep = {
+  tactic: string;
+  techniques: MitreTag[];
+  /** Every event that carried one of this tactic's techniques was blocked. */
+  blocked: boolean;
+};
+
+/** Group an incident's techniques by tactic, in kill-chain order, deduped by technique id. */
+export function killChain(events: KairosEvent[]): KillChainStep[] {
+  const byTactic = new Map<string, { techniques: Map<string, MitreTag>; verdicts: string[] }>();
+  for (const e of events) {
+    for (const t of e.mitre) {
+      const step = byTactic.get(t.tactic) ?? { techniques: new Map<string, MitreTag>(), verdicts: [] as string[] };
+      step.techniques.set(t.technique_id, t);
+      step.verdicts.push(e.verdict);
+      byTactic.set(t.tactic, step);
+    }
+  }
+  const rank = (tactic: string) => {
+    const i = TACTIC_ORDER.indexOf(tactic);
+    return i === -1 ? TACTIC_ORDER.length : i; // unknown tactics go last, never dropped
+  };
+  return [...byTactic.entries()]
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([tactic, s]) => ({
+      tactic,
+      techniques: [...s.techniques.values()],
+      blocked: s.verdicts.length > 0 && s.verdicts.every((v) => v === "blocked"),
+    }));
+}
+
+const ATTACK_ID = /^T\d{4}(\.\d{3})?$/;
+const ATLAS_ID = /^AML\.T\d{4}(\.\d{3})?$/;
+
+/**
+ * Official MITRE page for a technique, or null if the id doesn't look like one. The URL is
+ * built from a validated id on a fixed host, never taken from data, so no data can link out
+ * to an arbitrary domain.
+ */
+export function mitreUrl(tag: MitreTag): string | null {
+  if (tag.framework === "ATTACK" && ATTACK_ID.test(tag.technique_id)) {
+    return `https://attack.mitre.org/techniques/${tag.technique_id.replace(".", "/")}/`;
+  }
+  if (tag.framework === "ATLAS" && ATLAS_ID.test(tag.technique_id)) {
+    return `https://atlas.mitre.org/techniques/${tag.technique_id}`;
+  }
+  return null;
+}
+
+/** Events oldest first, for a timeline. */
+export function chronological(events: KairosEvent[]): KairosEvent[] {
+  return [...events].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+}

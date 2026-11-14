@@ -1,7 +1,14 @@
 """Kairos core engine. OWNER: Daylen (P3).
 
-The ONLY way anyone writes events: `record_event(...)`. Scoring and correlation live here too.
-Thresholds are in one place (LEVEL_THRESHOLDS) so they can be tuned without touching callers.
+Everything other folders may import from the engine is listed in __all__ below.
+
+    from engine import record_event, is_locked, is_frozen, publish_attempt
+
+- record_event(...)       the ONLY way events are written
+- score_to_level / incident_risk   code decides scores, thresholds live in engine/scoring.py
+- is_locked / is_frozen   Login Guard and the Agent Firewall ask these before acting
+- publish_attempt(...)    audience attempts + the sanitized public feed
+- create_approval(...)    ask a human; set_incident_summary(...) for the AI analyst
 """
 
 from __future__ import annotations
@@ -11,30 +18,50 @@ from typing import Any
 
 from core.db import supabase_admin
 from core.errors import AppError
-from engine.audit import write_audit
+from engine.appeals import create_appeal, list_appeals
+from engine.approvals import APPROVAL_TIMEOUT_SECONDS, create_approval, decide_approval, expire_stale_approvals
+from engine.audit import verify_audit, write_audit
+from engine.containment import ACCOUNT_LOCKED_MESSAGE, freeze_agent, is_frozen, is_locked, kill_switch
 from engine.correlation import correlate
-from schemas.kairos import Event, Level, MitreTag, Sensor, Source, Verdict
+from engine.feed import maybe_purge, publish_attempt, purge_raw_login_data, sanitize_text
+from engine.incidents import get_incident, list_incidents, mark_false_positive, set_incident_summary
+from engine.reset import reset_demo
+from engine.scoring import EXTRA_SENSOR_BONUS, LEVEL_THRESHOLDS, clamp_risk, incident_risk, risk_math, score_to_level
+from engine.stats import get_stats
+from schemas.kairos import Event, MitreTag, Sensor, Source, Verdict
 
 logger = logging.getLogger("api.engine")
 
-# Low 0-29, Medium 30-59, High 60-84, Critical 85-100.
-LEVEL_THRESHOLDS: list[tuple[int, Level]] = [(85, "critical"), (60, "high"), (30, "medium"), (0, "low")]
-EXTRA_SENSOR_BONUS = 15
-
-
-def score_to_level(risk: int) -> Level:
-    risk = max(0, min(100, risk))
-    for floor, level in LEVEL_THRESHOLDS:
-        if risk >= floor:
-            return level
-    return "low"
-
-
-def incident_risk(event_risks: list[int], sensor_count: int) -> int:
-    """Highest linked event risk + 15 for each extra listener involved, capped at 100."""
-    if not event_risks:
-        return 0
-    return min(100, max(event_risks) + EXTRA_SENSOR_BONUS * max(0, sensor_count - 1))
+__all__ = [
+    "ACCOUNT_LOCKED_MESSAGE",
+    "APPROVAL_TIMEOUT_SECONDS",
+    "EXTRA_SENSOR_BONUS",
+    "LEVEL_THRESHOLDS",
+    "create_appeal",
+    "create_approval",
+    "decide_approval",
+    "expire_stale_approvals",
+    "freeze_agent",
+    "get_incident",
+    "get_stats",
+    "incident_risk",
+    "is_frozen",
+    "is_locked",
+    "kill_switch",
+    "list_appeals",
+    "list_incidents",
+    "mark_false_positive",
+    "publish_attempt",
+    "purge_raw_login_data",
+    "record_event",
+    "reset_demo",
+    "risk_math",
+    "sanitize_text",
+    "score_to_level",
+    "set_incident_summary",
+    "verify_audit",
+    "write_audit",
+]
 
 
 def record_event(
@@ -55,7 +82,8 @@ def record_event(
 
     1. Inserts the event (level comes from score_to_level, never from the caller).
     2. Appends a tamper-evident audit entry (facts only, no attacker text).
-    3. Runs correlation, which may attach the event to an incident.
+    3. Runs correlation, which may attach the event to an incident (and, for a Critical scripted
+       incident, ask a human for approval).
 
     `raw_features` is for Login Guard timing/metadata only (never typed content); it is deleted
     after 24 hours. In a router, pass `db=Depends(get_db)` so tests use the in-memory database;
@@ -64,7 +92,7 @@ def record_event(
     Raises AppError(503) if the event or its audit entry cannot be saved. The caller's own
     allow/block decision does not depend on this call succeeding.
     """
-    risk = max(0, min(100, int(risk)))
+    risk = clamp_risk(risk)
     tags = [m if isinstance(m, MitreTag) else MitreTag(**m) for m in (mitre or [])]
     row: dict[str, Any] = {
         "sensor": sensor,
@@ -101,6 +129,7 @@ def record_event(
             },
         )
         incident_id = correlate(db, event)
+        maybe_purge(db)
     except AppError:
         raise
     except Exception:

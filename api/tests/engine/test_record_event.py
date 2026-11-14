@@ -57,11 +57,11 @@ def test_out_of_range_risk_is_clamped(fake_db):
 
 def test_audit_entry_is_written_and_chained(fake_db):
     first = _stage1(fake_db)
-    second = _stage1(fake_db, sensor="comms_guard", actor="j.smith", target="finance-staff", risk=50)
+    second = _stage1(fake_db, actor="someone-else", target="guest02")  # unrelated: no incident
     log = fake_db.tables["audit_log"].rows
     assert [e["action"] for e in log] == ["event_recorded", "event_recorded"]
     assert [e["detail"]["event_id"] for e in log] == [first.id, second.id]
-    assert log[0]["actor"] == "sensor:login_guard" and log[1]["actor"] == "sensor:comms_guard"
+    assert log[0]["actor"] == "sensor:login_guard"
     assert log[0]["prev_hash"] is None and log[1]["prev_hash"] == log[0]["hash"]
 
 

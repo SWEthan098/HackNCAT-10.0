@@ -49,10 +49,11 @@ class _FakeJWKS:
         return _K()
 
 
-# --- In-memory stand-in for the subset of supabase-py the routers use -------------------
+# --- In-memory stand-in for the subset of supabase-py the API uses ------------------------
 class _Result:
-    def __init__(self, data):
+    def __init__(self, data, count=None):
         self.data = data
+        self.count = count
 
 
 class _Rpc:
@@ -67,39 +68,94 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _cmp(value):
+    """Compare timestamps as times (ISO strings differ in format), everything else as is."""
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    return value
+
+
 class _Query:
     def __init__(self, table: _FakeTable, op: str, payload=None, **opts):
-        self.table, self.op, self.payload, self.opts, self.filters = table, op, payload, opts, []
+        self.table, self.op, self.payload, self.opts = table, op, payload, opts
+        self.filters, self._order, self._limit, self._count, self._negate = [], [], None, None, False
 
-    def select(self, *_a, **_k):
+    def select(self, *_a, count=None, **_k):
+        self._count = count or self._count
+        return self
+
+    @property
+    def not_(self):
+        self._negate = True
+        return self
+
+    def _where(self, test):
+        self.filters.append((lambda row: not test(row)) if self._negate else test)
+        self._negate = False
         return self
 
     def eq(self, col, val):
-        self.filters.append((col, val))
+        return self._where(lambda r: r.get(col) == val)
+
+    def neq(self, col, val):
+        return self._where(lambda r: r.get(col) != val)
+
+    def in_(self, col, values):
+        return self._where(lambda r: r.get(col) in list(values))
+
+    def is_(self, col, val):
+        return self._where(lambda r: r.get(col) is (None if val in ("null", None) else val))
+
+    def gte(self, col, val):
+        return self._where(lambda r: r.get(col) is not None and _cmp(r[col]) >= _cmp(val))
+
+    def gt(self, col, val):
+        return self._where(lambda r: r.get(col) is not None and _cmp(r[col]) > _cmp(val))
+
+    def lte(self, col, val):
+        return self._where(lambda r: r.get(col) is not None and _cmp(r[col]) <= _cmp(val))
+
+    def lt(self, col, val):
+        return self._where(lambda r: r.get(col) is not None and _cmp(r[col]) < _cmp(val))
+
+    def order(self, col, desc=False, **_k):
+        self._order.append((col, desc))
         return self
 
-    def limit(self, _n):
+    def limit(self, n):
+        self._limit = n
         return self
 
     def _match(self, row):
-        return all(row.get(c) == v for c, v in self.filters)
+        return all(test(row) for test in self.filters)
 
     def execute(self):
-        rows = self.table.rows
+        table, rows = self.table, self.table.rows
         if self.op == "select":
-            return _Result([dict(r) for r in rows if self._match(r)])
+            hit = [r for r in rows if self._match(r)]
+            for col, desc in reversed(self._order):
+                hit.sort(key=lambda r: _cmp(r.get(col)), reverse=desc)
+            total = len(hit)
+            if self._limit is not None:
+                hit = hit[: self._limit]
+            return _Result([dict(r) for r in hit], count=total if self._count else None)
+        if self.op == "insert":
+            payloads = self.payload if isinstance(self.payload, list) else [self.payload]
+            new = [table.new_row(p) for p in payloads]
+            rows.extend(new)
+            return _Result([dict(r) for r in new])
         if self.op == "upsert":
-            existing = next((r for r in rows if r["id"] == self.payload["id"]), None)
+            key = self.opts.get("on_conflict") or table.pk
+            existing = next((r for r in rows if r.get(key) == self.payload.get(key)), None)
             if existing and self.opts.get("ignore_duplicates"):
                 return _Result([])
             if existing:
                 existing.update(self.payload)
                 return _Result([dict(existing)])
-            row = {"display_name": None, "avatar_url": None, "created_at": None, "updated_at": None, **self.payload}
-            rows.append(row)
-            return _Result([dict(row)])
-        if self.op == "insert":
-            row = {"id": str(uuid.uuid4()), "created_at": _now_iso(), **self.table.defaults, **self.payload}
+            row = table.new_row(self.payload)
             rows.append(row)
             return _Result([dict(row)])
         if self.op == "update":
@@ -107,19 +163,28 @@ class _Query:
             for r in hit:
                 r.update(self.payload)
             return _Result([dict(r) for r in hit])
+        if self.op == "delete":
+            hit = [r for r in rows if self._match(r)]
+            table.rows[:] = [r for r in rows if not self._match(r)]
+            return _Result([dict(r) for r in hit])
         raise NotImplementedError(self.op)
 
 
 class _FakeTable:
-    def __init__(self, defaults: dict | None = None):
+    def __init__(self, defaults: dict | None = None, *, pk: str = "id", auto: bool = True):
         self.rows: list[dict] = []
-        self.defaults = defaults or {}
+        self.defaults, self.pk, self.auto = defaults or {}, pk, auto
+
+    def new_row(self, payload: dict) -> dict:
+        """What the database would fill in: id, created_at and column defaults."""
+        base = {"id": str(uuid.uuid4()), "created_at": _now_iso()} if self.auto else {}
+        return {**base, **{k: (v() if callable(v) else v) for k, v in self.defaults.items()}, **payload}
+
+    def select(self, *_a, count=None, **_k):
+        return _Query(self, "select").select(count=count)
 
     def insert(self, payload):
         return _Query(self, "insert", payload)
-
-    def select(self, *_a, **_k):
-        return _Query(self, "select")
 
     def upsert(self, payload, **opts):
         return _Query(self, "upsert", payload, **opts)
@@ -127,40 +192,78 @@ class _FakeTable:
     def update(self, payload):
         return _Query(self, "update", payload)
 
+    def delete(self):
+        return _Query(self, "delete")
+
+
+def _audit_hash(prev, row) -> str:
+    body = [prev or "", row["id"], row["created_at"], row["actor"], row["action"], row["detail"]]
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
 
 class FakeDB:
     def __init__(self):
+        profile = {"display_name": None, "avatar_url": None, "created_at": None, "updated_at": None}
         self.tables = {
-            "profiles": _FakeTable(),
-            "user_roles": _FakeTable(),
-            "events": _FakeTable({"incident_id": None, "raw_features": None}),
-            "incidents": _FakeTable(),
-            "audit_log": _FakeTable(),
+            "profiles": _FakeTable(profile, auto=False),
+            "user_roles": _FakeTable(auto=False),
+            "events": _FakeTable({"incident_id": None, "raw_features": None, "mitre": list}),
+            "incidents": _FakeTable(
+                {
+                    "updated_at": _now_iso,
+                    "risk": 0,
+                    "level": "low",
+                    "status": "new",
+                    "summary": None,
+                    "triage_label": None,
+                    "mitre": list,
+                }
+            ),
+            "approvals": _FakeTable(
+                {"status": "pending", "actions": list, "decided_by": None, "decided_at": None, "expires_at": None}
+            ),
+            "appeals": _FakeTable({"event_id": None, "incident_id": None, "status": "open"}),
+            "audit_log": _FakeTable(auto=False),
+            "entity_state": _FakeTable(
+                {"locked": False, "frozen": False, "sessions_revoked_at": None, "updated_by": None},
+                pk="entity",
+                auto=False,
+            ),
+            "attempts": _FakeTable({"message": None, "blocked_by": None, "technique": None, "breach": False}),
+            "public_feed": _FakeTable({"technique": None}),
         }
 
-    def rpc(self, name, params=None):
-        """Stand-in for the SQL functions the engine calls."""
-        if name != "audit_append":
-            raise NotImplementedError(name)
-        log = self.tables["audit_log"].rows
-        prev = log[-1]["hash"] if log else None
-        row = {
-            "id": len(log) + 1,
-            "created_at": _now_iso(),
-            "actor": params["p_actor"],
-            "action": params["p_action"],
-            "detail": params.get("p_detail") or {},
-            "prev_hash": prev,
-        }
-        row["hash"] = hashlib.sha256(json.dumps([prev or "", row], sort_keys=True).encode()).hexdigest()
-        log.append(row)
-        return _Rpc(dict(row))
+    def table(self, name):
+        return self.tables[name]
 
     def grant_role(self, user_id: str, role: str) -> None:
         self.tables["user_roles"].rows.append({"user_id": user_id, "role": role})
 
-    def table(self, name):
-        return self.tables[name]
+    def rpc(self, name, params=None):
+        """Stand-ins for the SQL functions in supabase/migrations/..._audit_chain.sql."""
+        log = self.tables["audit_log"].rows
+        if name == "audit_append":
+            prev = log[-1]["hash"] if log else None
+            row = {
+                "id": (log[-1]["id"] + 1) if log else 1,
+                "created_at": _now_iso(),
+                "actor": params["p_actor"],
+                "action": params["p_action"],
+                "detail": params.get("p_detail") or {},
+                "prev_hash": prev,
+            }
+            row["hash"] = _audit_hash(prev, row)
+            log.append(row)
+            return _Rpc(dict(row))
+        if name == "audit_verify":
+            bad, prev = None, None
+            for row in sorted(log, key=lambda r: r["id"]):
+                if row["prev_hash"] != prev or row["hash"] != _audit_hash(row["prev_hash"], row):
+                    bad = row["id"]
+                    break
+                prev = row["hash"]
+            return _Rpc([{"ok": bad is None, "entries_checked": len(log), "first_bad_id": bad}])
+        raise NotImplementedError(name)
 
 
 # --- Fixtures ----------------------------------------------------------------------------

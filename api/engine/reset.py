@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from engine import hooks
 from engine.audit import write_audit
 
 _ANY_UUID = "00000000-0000-0000-0000-000000000000"
@@ -19,5 +20,6 @@ def reset_demo(db, *, by: str) -> dict[str, int]:
     for table in _TABLES:
         counts[table] = len(db.table(table).delete().neq("id", _ANY_UUID).execute().data or [])
     counts["entity_state"] = len(db.table("entity_state").delete().neq("entity", "").execute().data or [])
+    hooks.demo_reset()  # Comms Guard clears its held messages
     write_audit(db, actor=by, action="demo_reset", detail={"deleted": counts})
     return counts

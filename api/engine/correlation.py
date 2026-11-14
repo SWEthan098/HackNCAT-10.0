@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from engine import hooks
 from engine.approvals import FINISHED, create_approval
 from engine.audit import write_audit
 from engine.scoring import incident_risk, score_to_level
@@ -76,15 +77,21 @@ def incident_title(events: list[dict]) -> str:
     return f"Multi-stage attack by {safe_name(events[0]['actor'])} ({listeners} listeners)"
 
 
-def refresh_incident(db, incident_id: str) -> dict:
-    """Recompute risk, level, title and MITRE roll-up from the incident's events."""
+def refresh_incident(db, incident_id: str, *, previous_level: str | None = None) -> dict:
+    """Recompute risk, level, title and MITRE roll-up from the incident's events.
+
+    If the level is different from `previous_level` (None for a new incident), Comms Guard is told.
+    """
     events = db.table("events").select("*").eq("incident_id", incident_id).order("created_at").execute().data
     sensors = unique(e["sensor"] for e in events)
     risk = incident_risk([e["risk"] for e in events], len(sensors))
     fields = {"risk": risk, "level": score_to_level(risk), "mitre": kill_chain(events)}
     if events:
         fields["title"] = incident_title(events)
-    return db.table("incidents").update(fields).eq("id", incident_id).execute().data[0]
+    incident = db.table("incidents").update(fields).eq("id", incident_id).execute().data[0]
+    if incident["level"] != previous_level:
+        hooks.incident_escalated(events, incident["level"])
+    return incident
 
 
 def correlate(db, event: Event) -> str | None:
@@ -133,7 +140,8 @@ def correlate(db, event: Event) -> str | None:
     if to_attach:
         db.table("events").update({"incident_id": incident_id}).in_("id", to_attach).execute()
 
-    incident = refresh_incident(db, incident_id)
+    previous_level = None if created else incidents[incident_id]["level"]
+    incident = refresh_incident(db, incident_id, previous_level=previous_level)
     write_audit(
         db,
         actor="engine:correlation",

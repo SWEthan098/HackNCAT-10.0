@@ -123,8 +123,6 @@ def test_redteam_run_works_for_red_team(client, fake_db, token_factory):
     assert r.status_code == 200, r.text
 
 
-# TODO(Daylen): drop the xfail once Miles's require_role("red_team") on /redteam/run is merged.
-@pytest.mark.xfail(strict=False, reason="waiting on the red_team check in routers/redteam.py (Miles)")
 def test_redteam_run_refuses_plain_user(client, fake_db, token_factory):
     r = client.post("/redteam/run", json={"stage": "full_chain"}, headers=_as_role(fake_db, token_factory, None))
     assert r.status_code == 403, r.text

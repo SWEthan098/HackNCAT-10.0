@@ -1,58 +1,56 @@
 "use client";
 
-// OWNER: Jordan (P4). KPI strip for the incident queue (GET /stats).
+// OWNER: Jordan (P4). KPI band for the incident queue (GET /stats): one hairline-divided
+// strip, open incidents as a severity donut, and a cumulative sparkline under "Attacks
+// blocked" when the page shares its live event stream. Color never stands alone: every
+// figure and slice is written out next to its mark.
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Skeleton, cn } from "@/components/ui";
 import { ApiError } from "@/lib/api";
+import { sparkPoints } from "@/lib/charts";
 import { formatDecisionTime } from "@/lib/incidents";
-import type { Level, Stats } from "@/lib/types/kairos";
-import { LEVEL_LABELS, LEVEL_SIGNAL } from "./LevelBadge";
+import type { KairosEvent, Level, Stats } from "@/lib/types/kairos";
+import { LEVEL_LABELS } from "./LevelBadge";
+import { Donut } from "./charts";
 
 const OPEN_ORDER: Level[] = ["critical", "high", "medium", "low"];
 
-function Kpi({ label, children, tone }: { label: string; children: React.ReactNode; tone?: string }) {
+const LEVEL_TEXT: Record<Level, string> = {
+  low: "text-level-low",
+  medium: "text-level-medium",
+  high: "text-level-high",
+  critical: "text-level-critical",
+};
+
+function Kpi({ label, children, tone, extra }: { label: string; children: React.ReactNode; tone?: string; extra?: React.ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col justify-between gap-1.5 border-rule px-3.5 py-3 sm:px-4">
       <dt className="text-sm text-muted">{label}</dt>
-      <dd className={cn("num m-0 font-display text-[1.75rem] font-semibold leading-none", tone ?? "text-ink")}>{children}</dd>
+      <dd className={cn("num m-0 font-display text-2xl font-semibold leading-none", tone ?? "text-ink")}>{children}</dd>
+      {extra}
     </div>
   );
 }
 
-/** Open incidents split by level: one bar in proportion, plus every count written out. */
+/** Open incidents split by level: the severity donut with every count written out. */
 function OpenIncidents({ counts }: { counts: Stats["open_incidents"] }) {
-  const total = OPEN_ORDER.reduce((n, l) => n + (counts[l] ?? 0), 0);
   return (
-    <div className="flex min-w-0 flex-col gap-2 px-3.5 py-3 sm:px-4">
+    <div className="flex min-w-0 flex-col gap-1.5 px-3.5 py-3 sm:px-4">
       <dt className="text-sm text-muted">Open incidents</dt>
-      <dd className="m-0 flex min-w-0 flex-col gap-2">
-        <span className="flex items-center gap-3">
-          <span className="num font-display text-[1.75rem] font-semibold leading-none text-ink">{total}</span>
-          <span aria-hidden className="flex h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-paper-3">
-            {total > 0 &&
-              OPEN_ORDER.map((l) =>
-                (counts[l] ?? 0) > 0 ? (
-                  <span key={l} className={cn("h-full border-r border-paper-2 last:border-r-0", LEVEL_SIGNAL[l])} style={{ width: `${((counts[l] ?? 0) / total) * 100}%` }} />
-                ) : null,
-              )}
-          </span>
-        </span>
-        <span className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-          {OPEN_ORDER.map((l) => (
-            <span key={l} className={cn("flex items-center gap-1.5", (counts[l] ?? 0) === 0 && "text-muted")}>
-              <span aria-hidden className={cn("size-2 rounded-[1px]", LEVEL_SIGNAL[l])} />
-              {LEVEL_LABELS[l]} <span className="num font-semibold">{counts[l] ?? 0}</span>
-            </span>
-          ))}
-        </span>
+      <dd className="m-0 min-w-0">
+        <Donut
+          size={84}
+          centerLabel="open"
+          data={OPEN_ORDER.map((l) => ({ key: l, label: LEVEL_LABELS[l], value: counts[l] ?? 0, colorClass: LEVEL_TEXT[l] }))}
+        />
       </dd>
     </div>
   );
 }
 
-export function KpiStrip() {
+export function KpiStrip({ events }: { events?: KairosEvent[] | null }) {
   const { api } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +77,9 @@ export function KpiStrip() {
   }
   if (!stats) return <Skeleton className="h-[5.5rem] w-full rounded-card" />;
 
+  // Trend of blocked events this session, drawn only when the page shares its stream.
+  const blockedTrend = sparkPoints(events ?? [], (e) => e.verdict === "blocked");
+
   return (
     <dl
       aria-label="Key numbers"
@@ -91,7 +92,20 @@ export function KpiStrip() {
       )}
     >
       <OpenIncidents counts={stats.open_incidents} />
-      <Kpi label="Attacks blocked">{stats.attacks_blocked}</Kpi>
+      <Kpi
+        label="Attacks blocked"
+        extra={
+          blockedTrend ? (
+            <dd aria-hidden className="m-0 -mb-1">
+              <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-6 w-full text-accent">
+                <polyline points={blockedTrend} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              </svg>
+            </dd>
+          ) : undefined
+        }
+      >
+        {stats.attacks_blocked}
+      </Kpi>
       <Kpi label="Breaches" tone={stats.breaches > 0 ? "text-level-critical-ink" : undefined}>
         {stats.breaches}
       </Kpi>

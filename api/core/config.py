@@ -66,6 +66,10 @@ class Settings:
     anthropic_api_key: str = field(default="", repr=False)
     anthropic_effort: str = "medium"
 
+    # Kairos: True forces the scripted Red Team chain + analyst onto deterministic mocks.
+    # /attack ALWAYS uses the real model (honest offline state if it is unreachable).
+    demo_mode: bool = False
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
@@ -81,6 +85,7 @@ class Settings:
             "ai_model": self.ai_model or None,
             "groq_api_key_set": bool(self.groq_api_key),
             "anthropic_api_key_set": bool(self.anthropic_api_key),
+            "demo_mode": self.demo_mode,
         }
 
 
@@ -107,4 +112,5 @@ def get_settings() -> Settings:
         groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
         anthropic_effort=os.getenv("ANTHROPIC_EFFORT", "medium").strip().lower() or "medium",
+        demo_mode=_bool("DEMO_MODE", False),
     )

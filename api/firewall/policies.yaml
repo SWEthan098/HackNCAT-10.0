@@ -1,0 +1,8 @@
+# What each AI agent is allowed to do. OWNER: Ethan (P1). Shown on a pitch slide.
+finance_agent:
+  tools: [read_email, read_file, send_email]
+  send_email:
+    allowed_domains: [cisco.example]
+    requires_approval_at_level: high
+  read_file:
+    allowed_paths: [/shared/finance/]

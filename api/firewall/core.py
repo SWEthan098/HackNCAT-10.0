@@ -46,6 +46,7 @@ class TaskContext:
     requester_trusted: bool = True  # False for audience (/attack): the requester IS the attacker
     dlp_profile: str = "internal"  # "public" for /attack: also redacts salaries, accounts, personal data
     detectors_enabled: bool = True
+    record_allowed: bool = True  # the analyst only records non-allowed decisions (keeps the stream clean)
     decisions: list[Decision] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
     blocked_layers: list[str] = field(default_factory=list)
@@ -78,6 +79,7 @@ class Firewall:
         requester_trusted: bool = True,
         dlp_profile: str = "internal",
         detectors_enabled: bool = True,
+        record_allowed: bool = True,
     ) -> Firewall:
         policy: AgentPolicy | None
         error = None
@@ -98,6 +100,7 @@ class Firewall:
             requester_trusted=requester_trusted,
             dlp_profile=dlp_profile,
             detectors_enabled=detectors_enabled,
+            record_allowed=record_allowed,
             policy_error=error,
         )
         return cls(ctx, state)
@@ -118,15 +121,20 @@ class Firewall:
         ctx.max_risk = max(ctx.max_risk, risk)
         if verdict == "blocked" and layer and layer not in ctx.blocked_layers:
             ctx.blocked_layers.append(layer)
-        event = record(
-            actor=ctx.actor,
-            target=ctx.target,
-            source=ctx.source,
-            action=action or f"{'tool_call' if verdict == 'allowed' else 'tool_call_' + verdict}:{tool}",
-            risk=risk,
-            verdict=verdict,
-            reason=reason,
-            mitre=mitre,
+        skip = verdict == "allowed" and not ctx.record_allowed
+        event = (
+            None
+            if skip
+            else record(
+                actor=ctx.actor,
+                target=ctx.target,
+                source=ctx.source,
+                action=action or f"{'tool_call' if verdict == 'allowed' else 'tool_call_' + verdict}:{tool}",
+                risk=risk,
+                verdict=verdict,
+                reason=reason,
+                mitre=mitre,
+            )
         )
         if event is not None:
             ctx.events.append(event)

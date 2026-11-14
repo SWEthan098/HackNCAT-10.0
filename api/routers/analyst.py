@@ -1,7 +1,8 @@
 """AI Security Analyst + agent run. OWNER: Ethan (P1). Bearer auth.
 
 POST /agent/run runs the victim finance agent (protected = through the Agent Firewall).
-POST /analyst/ask is still a stub (built in a later step).
+POST /analyst/ask answers SOC questions with event + MITRE citations (read-only; runs through the firewall).
+POST /analyst/incidents/{id}/summary returns the incident summary + code-computed triage label.
 """
 
 from __future__ import annotations
@@ -10,7 +11,10 @@ from fastapi import APIRouter, Depends
 
 from agents.victim.planner import AgentOffline
 from agents.victim.runner import run_agent
+from analyst.data import AnalystData
+from analyst.service import ask, summarize_incident
 from auth import AuthUser, current_user
+from core.config import get_settings
 from core.db import get_db
 from core.errors import AppError
 from firewall.integrations import EntityStateReader
@@ -40,6 +44,31 @@ async def agent_run(
     return AgentRunResponse(output=outcome.run.output, decisions=decisions)
 
 
+def _data(db) -> AnalystData:
+    return AnalystData(db, demo=get_settings().demo_mode)
+
+
 @router.post("/analyst/ask", response_model=AnalystAskResponse, summary="Ask the AI security analyst")
-async def analyst_ask(body: AnalystAskRequest, _: AuthUser = Depends(current_user)) -> AnalystAskResponse:
-    return AnalystAskResponse(answer="stub: the analyst is not built yet", citations=[])
+async def analyst_ask(
+    body: AnalystAskRequest,
+    user: AuthUser = Depends(current_user),
+    db=Depends(get_db),
+    ai: AIService = Depends(get_ai_service),
+) -> AnalystAskResponse:
+    result = await ask(body.question, data=_data(db), ai=ai, actor=f"soc:{user.id}", state=EntityStateReader(db))
+    return AnalystAskResponse(answer=result.answer, citations=result.citations)
+
+
+@router.post(
+    "/analyst/incidents/{incident_id}/summary",
+    response_model=AnalystAskResponse,
+    summary="AI summary + triage label for one incident",
+)
+async def analyst_incident_summary(
+    incident_id: str,
+    _: AuthUser = Depends(current_user),
+    db=Depends(get_db),
+    ai: AIService = Depends(get_ai_service),
+) -> AnalystAskResponse:
+    result = await summarize_incident(incident_id, data=_data(db), ai=ai, state=EntityStateReader(db))
+    return AnalystAskResponse(answer=result.answer, citations=result.citations)

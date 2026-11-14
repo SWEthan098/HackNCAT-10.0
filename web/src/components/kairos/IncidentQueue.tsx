@@ -35,8 +35,10 @@ function IncidentRow({ incident }: { incident: Incident }) {
       <Link
         href={`/console/incidents/${incident.id}`}
         className={cn(
-          "relative grid grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 py-3 pl-4 pr-3.5 no-underline sm:grid-cols-[4rem_minmax(0,1fr)_auto] sm:pr-4",
-          "transition-colors hover:bg-paper-3 focus-visible:-outline-offset-2",
+          "relative grid grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 py-3 pl-4 pr-3.5 no-underline sm:grid-cols-[4rem_minmax(0,1fr)_7.5rem_5.5rem] sm:pr-4",
+          "transition-colors focus-visible:-outline-offset-2",
+          // Severity wash only on Critical rows: the one row allowed to shout (Figma B theme).
+          incident.level === "critical" ? "bg-level-critical-wash/45 hover:bg-level-critical-wash/70" : "hover:bg-paper-3",
           // The level edge: the first thing the eye catches when scanning the queue.
           "before:absolute before:inset-y-0 before:left-0 before:w-1",
           LEVEL_EDGE[incident.level],
@@ -49,7 +51,9 @@ function IncidentRow({ incident }: { incident: Incident }) {
         <span className="min-w-0">
           <span className="line-clamp-2 text-[0.96875rem] font-medium leading-snug text-ink">{incident.title}</span>
           <span className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm text-ink-2">
-            <StatusChip status={incident.status} />
+            <span className="sm:hidden">
+              <StatusChip status={incident.status} />
+            </span>
             <span className="text-muted">{incident.source === "audience" ? "Audience attacker" : "Scripted chain"}</span>
             <span className="num font-mono text-[0.8125rem] text-muted sm:hidden">
               {new Date(incident.created_at).toLocaleTimeString(undefined, { hour12: false, hour: "2-digit", minute: "2-digit" })}
@@ -57,7 +61,10 @@ function IncidentRow({ incident }: { incident: Incident }) {
             {topTechnique && <MitreChip tag={topTechnique} />}
           </span>
         </span>
-        <span className="hidden items-center gap-2 pt-0.5 sm:flex">
+        <span className="hidden pt-0.5 sm:flex">
+          <StatusChip status={incident.status} />
+        </span>
+        <span className="hidden items-center gap-1.5 pt-0.5 sm:flex">
           <span className="num font-mono text-[0.8125rem] text-muted">
             {new Date(incident.created_at).toLocaleTimeString(undefined, { hour12: false, hour: "2-digit", minute: "2-digit" })}
           </span>
@@ -218,11 +225,23 @@ export function IncidentQueue() {
           }
         />
       ) : (
-        <ul className="flex flex-col divide-y divide-rule">
-          {visible.map((i) => (
-            <IncidentRow key={i.id} incident={i} />
-          ))}
-        </ul>
+        <>
+          {/* Column heads (the rows carry the real labels; this is the table's scan line). */}
+          <div
+            aria-hidden
+            className="hidden gap-x-3 border-b border-rule pb-1.5 pl-4 pr-3.5 pt-2 text-xs text-muted sm:grid sm:grid-cols-[4rem_minmax(0,1fr)_7.5rem_5.5rem] sm:pr-4"
+          >
+            <span>Risk</span>
+            <span>Incident</span>
+            <span>Status</span>
+            <span>Time</span>
+          </div>
+          <ul className="flex flex-col divide-y divide-rule">
+            {visible.map((i) => (
+              <IncidentRow key={i.id} incident={i} />
+            ))}
+          </ul>
+        </>
       )}
     </Panel>
   );

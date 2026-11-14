@@ -24,7 +24,11 @@ const SENSOR_LABELS: Record<Sensor, string> = {
 
 type Status = "connecting" | "live" | "reconnecting" | "demo";
 
-function useLiveEvents() {
+/**
+ * The console's one event stream (fetch + Realtime + honest demo fallback). The page can
+ * own it and share the same rows with the charts row; the feed then renders from the prop.
+ */
+export function useLiveEvents() {
   const [events, setEvents] = useState<KairosEvent[] | null>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [attempt, setAttempt] = useState(0);
@@ -148,8 +152,21 @@ function EventRow({ event }: { event: KairosEvent }) {
   );
 }
 
-export function LiveEventFeed({ className }: { className?: string }) {
-  const { events, status, retry } = useLiveEvents();
+export type LiveEvents = ReturnType<typeof useLiveEvents>;
+
+/** Pass `live` to render from a stream the page already owns; omitted, the feed runs its own. */
+export function LiveEventFeed({ className, live }: { className?: string; live?: LiveEvents }) {
+  if (live) return <FeedView className={className} live={live} />;
+  return <SelfOwnedFeed className={className} />;
+}
+
+function SelfOwnedFeed({ className }: { className?: string }) {
+  const live = useLiveEvents();
+  return <FeedView className={className} live={live} />;
+}
+
+function FeedView({ className, live }: { className?: string; live: LiveEvents }) {
+  const { events, status, retry } = live;
   // The screen-reader announcement and the visible label stay one thing.
   const statusLabel =
     status === "live" ? "Live" : status === "demo" ? "Demo data" : status === "reconnecting" ? "Reconnecting…" : "Connecting…";

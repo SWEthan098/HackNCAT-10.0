@@ -66,16 +66,25 @@ export function usePendingApprovals(enabled: boolean): ApprovalRow[] | null {
   }, [enabled]);
 
   // Re-render exactly when the next pending deadline passes (same pattern as the phone), so
-  // an expiring request drops out of the badge and banner without a reload.
-  const [now, setNow] = useState(() => Date.now());
+  // an expiring request drops out of the badge and banner without a reload. The clock is
+  // null until mount: reading Date.now() during render is non-deterministic and breaks
+  // prerendering (next build fails on /console/*); before the first tick there are no rows
+  // to evaluate anyway, so pending stays null and the badge/banner simply don't render yet.
+  const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
+    // A 0ms timeout, not a sync set: the hooks lint forbids cascading renders from effects.
+    const t = window.setTimeout(() => setNow(Date.now()), 0);
+    return () => window.clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (now === null) return;
     const at = nextDeadline(rows ?? [], now);
     if (at === null) return;
     const t = setTimeout(() => setNow(Date.now()), Math.max(0, at - Date.now()) + 250);
     return () => clearTimeout(t);
   }, [rows, now]);
 
-  return useMemo(() => (rows === null ? null : pendingApprovals(rows, now)), [rows, now]);
+  return useMemo(() => (rows === null || now === null ? null : pendingApprovals(rows, now)), [rows, now]);
 }
 
 /** "Approvals" link for the console top bar, with a count badge while requests wait. */

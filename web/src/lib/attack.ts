@@ -9,6 +9,7 @@ import { ApiError } from "@/lib/api";
 import type {
   AttackRequest,
   AttackResponse,
+  LayerResult,
   AttackType,
   MitreTag,
   PlaygroundLaunchRequest,
@@ -265,6 +266,20 @@ export function classifyError(e: unknown): LaunchError {
  * breach, so the counter counts rows with layers_reached >= 5.
  */
 export const BREACH_LAYERS = 5;
+
+/**
+ * "You made it X of 5 layers deep": how many layers the attack got past. A breach got
+ * through everything; otherwise count the layers passed before one blocked it.
+ */
+export function layersDeep(layers: LayerResult[], breach: boolean): number {
+  if (breach) return BREACH_LAYERS;
+  let depth = 0;
+  for (const layer of layers) {
+    if (layer.status === "blocked") break;
+    if (layer.status === "passed") depth += 1;
+  }
+  return Math.min(depth, BREACH_LAYERS);
+}
 
 export function counterText(attacks: number, breaches: number): string {
   const a = `${attacks.toLocaleString("en-US")} ${attacks === 1 ? "attack" : "attacks"}`;

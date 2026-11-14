@@ -467,7 +467,60 @@ body:has(.atk) {
   animation: atk-blink 1s steps(1) infinite;
 }
 
+/* Step 10: the defense layers land one by one; the depth line arrives last. */
+.atk-layer-reveal {
+  animation: atk-layer-in var(--dur-short) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 340ms);
+}
+@keyframes atk-layer-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Inline text action (the appeal link) and the appeal textarea. */
+.atk-link {
+  color: var(--atk-signal);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+.atk-link:hover {
+  color: var(--atk-ink);
+}
+.atk-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.atk-input {
+  background: var(--atk-well);
+  border: 1px solid var(--atk-rule-2);
+  border-radius: var(--radius-input);
+  color: var(--atk-ink);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 16px;
+  line-height: 1.5;
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+}
+.atk-input:focus-visible {
+  outline-color: var(--color-focus);
+}
+.atk-input[aria-invalid="true"] {
+  border-color: var(--atk-tone-blocked);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .atk-layer-reveal {
+    animation-duration: 0.01ms;
+    animation-delay: 0s;
+  }
+
   .atk-ladder[data-mode="result"] li .atk-ladder-bar,
   .atk-live-dot::after,
   .atk-cursor {

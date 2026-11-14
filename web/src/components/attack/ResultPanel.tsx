@@ -10,13 +10,16 @@
 // deep"; TrickResult's footer is where the Appeal button goes; ErrorResult's rate_limited branch
 // is where the countdown goes (retryAfterSeconds is already parsed).
 
-import type { Ref } from "react";
+import { useEffect, useId, useState, type Ref } from "react";
 import { IconAlert, IconCheck, Spinner } from "@/components/ui";
+import { ApiError, apiFetch } from "@/lib/api";
 import {
   ATTACK_NAMES,
+  BREACH_LAYERS,
   LAUNCH_COPY,
   RESPONSE_COPY,
   layerLabel,
+  layersDeep,
   techniqueForDelivery,
   techniquesFor,
   trickTone,
@@ -26,7 +29,7 @@ import {
   type TrickTone,
 } from "@/lib/attack";
 import { levelForRisk } from "@/lib/liveEvents";
-import type { AttackResponse, LayerResult, MitreTag, PlaygroundLaunchResponse } from "@/lib/types/kairos";
+import type { Appeal, AttackResponse, LayerResult, MitreTag, PlaygroundLaunchResponse } from "@/lib/types/kairos";
 import { ResponseLadder } from "./ResponseLadder";
 
 const LEVEL_LABEL = { low: "Low", medium: "Medium", high: "High", critical: "Critical" } as const;
@@ -81,6 +84,14 @@ function ErrorResult({ name, error, onRetry }: { name: string; error: LaunchErro
       : error.kind === "rate_limited"
         ? "The defenders are busy"
         : "Kairos refused that request";
+  // Rate-limit countdown (step 10): tick down, then the button frees itself.
+  const [secondsLeft, setSecondsLeft] = useState(error.kind === "rate_limited" ? error.retryAfterSeconds : null);
+  useEffect(() => {
+    if (secondsLeft === null || secondsLeft <= 0) return;
+    const t = window.setTimeout(() => setSecondsLeft((n) => (n === null ? null : n - 1)), 1000);
+    return () => window.clearTimeout(t);
+  }, [secondsLeft]);
+  const waiting = secondsLeft !== null && secondsLeft > 0;
   return (
     <div>
       <p className="text-sm atk-muted">{name}</p>
@@ -89,8 +100,8 @@ function ErrorResult({ name, error, onRetry }: { name: string; error: LaunchErro
         {title}
       </h2>
       <p className="mt-2 atk-ink-2">{error.message}</p>
-      <button type="button" className="atk-ghost mt-5" onClick={onRetry}>
-        Try again
+      <button type="button" className="atk-ghost mt-5" onClick={onRetry} disabled={waiting}>
+        {waiting ? `Try again in ${secondsLeft}s` : "Try again"}
       </button>
     </div>
   );
@@ -154,21 +165,127 @@ function TrickResult({ result }: { result: Extract<AttackResult, { kind: "trick"
       {tone === "breach" && (
         <p className="mt-2 text-sm atk-ink-2">The defenders can see this attempt. Thanks for finding a gap in a test environment.</p>
       )}
-      <TrickLayers layers={response.layers} blockedBy={response.blocked_by} />
+      <TrickLayers layers={response.layers} blockedBy={response.blocked_by} breach={response.breach} animate={tone !== "harmless"} />
       <Facts techniques={technique ? [technique] : []} />
       <div className="mt-5">
         <p className="text-sm font-medium">What you sent</p>
         <p className="atk-well mt-2 whitespace-pre-wrap px-3 py-3 text-sm atk-ink-2 [overflow-wrap:anywhere]">{result.message}</p>
       </div>
+      {(tone === "blocked" || tone === "flagged") && <AppealForm />}
+    </div>
+  );
+}
+
+/**
+ * Appeal a block (step 10, fairness): POST /appeals is public. The contract's /attack
+ * response carries no event id, so the appeal can't point at the exact event yet; the
+ * visitor's reason is filed on its own (TODO: add event_id once Ethan returns one).
+ */
+function AppealForm() {
+  const inputId = useId();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [filed, setFiled] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setError("Say why this block was wrong, in a sentence or two.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch<Appeal>("/appeals", { method: "POST", body: { reason: trimmed.slice(0, 1000) } });
+      setFiled(true);
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.status !== 0
+          ? `${err.message} The appeal was not filed.`
+          : "Kairos can't be reached, so the appeal was not filed. Try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (filed) {
+    return (
+      <p className="mt-5 border-t atk-rule pt-4 text-sm atk-ink-2" role="status">
+        <IconCheck size={16} className="mr-1.5 inline-block align-[-3px] atk-tone-harmless" />
+        Appeal received. A defender will look at this block with your note beside it.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-5 border-t atk-rule pt-4">
+      {!open ? (
+        <p className="text-sm atk-ink-2">
+          Think this block was a mistake?{" "}
+          <button type="button" className="atk-link" onClick={() => setOpen(true)}>
+            Appeal it
+          </button>
+        </p>
+      ) : (
+        <form noValidate onSubmit={submit}>
+          <label htmlFor={inputId} className="block text-sm font-medium">
+            Why was this block wrong? <span className="font-normal atk-muted">(required, stays anonymous)</span>
+          </label>
+          <textarea
+            id={inputId}
+            value={reason}
+            maxLength={1000}
+            onChange={(e) => {
+              setReason(e.target.value);
+              if (error) setError(null);
+            }}
+            rows={3}
+            className="atk-input mt-2 w-full resize-y"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${inputId}-err` : undefined}
+          />
+          <p id={`${inputId}-err`} className="mt-1 min-h-[1lh] text-sm atk-tone-blocked" aria-live="polite">
+            {error}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <button type="submit" className="atk-ghost" disabled={busy}>
+              {busy ? "Filing the appeal" : "File the appeal"}
+            </button>
+            <button type="button" className="atk-link text-sm" onClick={() => setOpen(false)} disabled={busy}>
+              Never mind
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
 
 const STATUS_WORD: Record<LayerResult["status"], string> = { passed: "Passed", blocked: "Blocked here", skipped: "Not reached" };
 
-/** Basic list for step 9; step 10 replaces the body with the animated one-by-one reveal. */
-function TrickLayers({ layers, blockedBy }: { layers: AttackResponse["layers"]; blockedBy: string | null }) {
+/**
+ * The 5 defense layers, revealed one by one (step 10), with "You made it X of 5 layers
+ * deep" at the end. The reveal is pure CSS with per-row delays: content is in the page
+ * from the start, and reduced-motion (base.css) collapses it to an instant appearance.
+ */
+function TrickLayers({
+  layers,
+  blockedBy,
+  breach,
+  animate,
+}: {
+  layers: AttackResponse["layers"];
+  blockedBy: string | null;
+  breach: boolean;
+  animate: boolean;
+}) {
+  // Every launch passes through the "running" state, which unmounts this list, so the
+  // reveal restarts by itself for each new result.
   if (layers.length === 0) return null;
+  const deep = layersDeep(layers, breach);
   return (
     <div className="mt-5">
       <h3 className="text-base">Defense layers</h3>
@@ -176,7 +293,8 @@ function TrickLayers({ layers, blockedBy }: { layers: AttackResponse["layers"]; 
         {layers.map((l, i) => (
           <li
             key={l.name}
-            className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-3 border-t atk-rule py-2.5 first:border-t-0"
+            style={animate ? ({ "--i": i } as React.CSSProperties) : undefined}
+            className={`grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-3 border-t atk-rule py-2.5 first:border-t-0 ${animate ? "atk-layer-reveal" : ""}`}
             data-blocking={l.name === blockedBy || undefined}
           >
             <span className="num text-sm atk-muted" aria-hidden="true">
@@ -187,6 +305,14 @@ function TrickLayers({ layers, blockedBy }: { layers: AttackResponse["layers"]; 
           </li>
         ))}
       </ol>
+      <p
+        style={animate ? ({ "--i": layers.length } as React.CSSProperties) : undefined}
+        className={`mt-3 text-lg font-semibold ${animate ? "atk-layer-reveal" : ""}`}
+      >
+        You made it <span className="num">{deep}</span> of <span className="num">{BREACH_LAYERS}</span> layers deep.
+        {deep > 0 && deep < BREACH_LAYERS && <span className="ml-1 font-normal atk-ink-2">Closer than most. Try another angle.</span>}
+        {deep === 0 && <span className="ml-1 font-normal atk-ink-2">The first wall held. Try hiding it differently.</span>}
+      </p>
     </div>
   );
 }

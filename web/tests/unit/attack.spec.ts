@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { ApiError } from "../../src/lib/api";
 import {
+  layersDeep,
   CAPS,
   CODENAME_WORDS,
   DEFAULT_BOSS,
@@ -27,6 +28,7 @@ import {
   techniquesFor,
   trickTone,
 } from "../../src/lib/attack";
+import type { LayerResult } from "../../src/lib/types/kairos";
 
 const settings = { password: DEFAULT_PASSWORD, boss: DEFAULT_BOSS, trick: DEFAULT_TRICK };
 
@@ -180,4 +182,19 @@ test("ready-made tricks fit the limit and never name a real domain", () => {
     expect(trick.text).not.toMatch(/cisco\.com/i);
     for (const domain of trick.text.match(/@[\w-]+(?:\.[\w-]+)+/g) ?? []) expect(domain).toMatch(/\.example$/);
   }
+});
+
+// ---- step 10: layers deep ----
+
+const L = (name: string, status: LayerResult["status"]): LayerResult => ({ name, status });
+
+test("layersDeep counts passed layers up to the block, and 5 on a breach", () => {
+  const layers = [L("injection_scan", "passed"), L("intent_check", "passed"), L("scope_policy", "blocked"), L("taint_tracking", "skipped"), L("leak_protection", "skipped")];
+  expect(layersDeep(layers, false)).toBe(2);
+  expect(layersDeep(layers, true)).toBe(5);
+  expect(layersDeep([L("injection_scan", "blocked")], false)).toBe(0);
+  expect(layersDeep([], false)).toBe(0);
+  expect(layersDeep([], true)).toBe(5);
+  // All five passed with no block and no breach flag: deep but not a breach.
+  expect(layersDeep(["injection_scan", "intent_check", "scope_policy", "taint_tracking", "leak_protection"].map((n) => L(n, "passed")), false)).toBe(5);
 });

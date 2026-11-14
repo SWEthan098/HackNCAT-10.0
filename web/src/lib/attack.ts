@@ -14,6 +14,7 @@ import type {
   MitreTag,
   PlaygroundLaunchRequest,
   PlaygroundLaunchResponse,
+  Verdict,
 } from "@/lib/types/kairos";
 
 // ---------------------------------------------------------------------------------------
@@ -261,15 +262,13 @@ export function classifyError(e: unknown): LaunchError {
 // Live counter (public_feed, anon read)
 // ---------------------------------------------------------------------------------------
 
-/**
- * public_feed has no breach column. An attempt that got past all five defense layers is a
- * breach, so the counter counts rows with layers_reached >= 5.
- */
+/** Kairos runs five defense layers. Used by the per-attacker "X of 5 layers deep" line ONLY. */
 export const BREACH_LAYERS = 5;
 
 /**
- * "You made it X of 5 layers deep": how many layers the attack got past. A breach got
- * through everything; otherwise count the layers passed before one blocked it.
+ * "You made it X of 5 layers deep": how many layers the attack got past. This is fed by the
+ * AttackResponse's real `breach` field — a breach got through everything; otherwise count the
+ * layers passed before one blocked it. It is per-result flavor text, never an aggregate count.
  */
 export function layersDeep(layers: LayerResult[], breach: boolean): number {
   if (breach) return BREACH_LAYERS;
@@ -281,10 +280,64 @@ export function layersDeep(layers: LayerResult[], breach: boolean): number {
   return Math.min(depth, BREACH_LAYERS);
 }
 
-export function counterText(attacks: number, breaches: number): string {
-  const a = `${attacks.toLocaleString("en-US")} ${attacks === 1 ? "attack" : "attacks"}`;
-  const b = `${breaches.toLocaleString("en-US")} ${breaches === 1 ? "breach" : "breaches"}`;
-  return `${a}, ${b}`;
+/** Verdicts that mean Kairos stepped in ("stopped" on the public counter). */
+export const STOPPED_VERDICTS: readonly Verdict[] = ["blocked", "flagged"];
+
+/** One load scans at most this many rows (PostgREST caps a select at 1,000 anyway). */
+export const FEED_SCAN_LIMIT = 1000;
+
+export type FeedCounts = {
+  /** Every public_feed row is one attack (the database's exact total). */
+  attacks: number;
+  /** Rows whose verdict is blocked or flagged. null when the scan was partial (unknowable). */
+  stopped: number | null;
+  /**
+   * Rows whose `breach` field is `true` — and ONLY that. null (segment omitted) until the rows
+   * actually carry a boolean `breach` column: a row that merely lacks the field is never shown
+   * as "0 breaches", and layers_reached NEVER counts as a breach (all five layers read "passed"
+   * on a harmless answered question, so layers prove nothing about breaches).
+   */
+  breaches: number | null;
+};
+
+/**
+ * Counts for the live counter from a scan of public_feed rows plus the database's exact total.
+ * Feature detection: the breaches figure appears as soon as the rows carry a boolean `breach`
+ * field (Daylen's column), with no code change here. Unknown figures are null, never guessed.
+ */
+export function feedCounts(rows: readonly unknown[], exactTotal?: number): FeedCounts {
+  let stopped = 0;
+  let breaches = 0;
+  let sawBreachField = false;
+  for (const raw of rows) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const row = raw as Record<string, unknown>;
+    if (typeof row.verdict === "string" && (STOPPED_VERDICTS as readonly string[]).includes(row.verdict)) stopped += 1;
+    if (typeof row.breach === "boolean") {
+      sawBreachField = true;
+      if (row.breach) breaches += 1;
+    }
+  }
+  const attacks = typeof exactTotal === "number" && Number.isFinite(exactTotal) && exactTotal >= rows.length ? exactTotal : rows.length;
+  // A partial scan can't honestly say how many were stopped or breached; say attacks only.
+  const partial = attacks > rows.length;
+  return {
+    attacks,
+    stopped: partial ? null : stopped,
+    breaches: partial || !sawBreachField ? null : breaches,
+  };
+}
+
+/**
+ * "43 attacks · 35 stopped · 0 breaches". A segment appears only when it is honestly known
+ * (see FeedCounts); middle dots keep it one short line at phone width.
+ */
+export function counterText(counts: FeedCounts): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  const parts = [`${n(counts.attacks)} ${counts.attacks === 1 ? "attack" : "attacks"}`];
+  if (counts.stopped !== null) parts.push(`${n(counts.stopped)} stopped`);
+  if (counts.breaches !== null) parts.push(`${n(counts.breaches)} ${counts.breaches === 1 ? "breach" : "breaches"}`);
+  return parts.join(" · ");
 }
 
 export function formatUsd(amount: number): string {

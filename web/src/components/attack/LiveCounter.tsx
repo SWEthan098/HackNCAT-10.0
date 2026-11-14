@@ -1,13 +1,15 @@
 "use client";
 
-// Live "N attacks, 0 breaches" from public_feed (anon read + Realtime). If it can't load, it
-// says so. It never shows a made-up number.
+// Live "N attacks · N stopped · N breaches" from public_feed (anon read + Realtime). If it
+// can't load, it says so. It never shows a made-up number: breaches come ONLY from a real
+// boolean `breach` column (feature-detected per load; until Daylen's column lands the segment
+// is omitted), never inferred from layers_reached.
 
 import { useEffect, useState } from "react";
-import { BREACH_LAYERS, counterText } from "@/lib/attack";
+import { FEED_SCAN_LIMIT, type FeedCounts, counterText, feedCounts } from "@/lib/attack";
 import { createClient } from "@/lib/supabase/client";
 
-type Counter = { status: "loading" } | { status: "live"; attacks: number; breaches: number } | { status: "unavailable" };
+type Counter = { status: "loading" } | { status: "live"; counts: FeedCounts } | { status: "unavailable" };
 
 function useLiveCounter(): Counter {
   const [state, setState] = useState<Counter>({ status: "loading" });
@@ -29,17 +31,17 @@ function useLiveCounter(): Counter {
     // Counts come from the database every time (never incremented locally), so a re-delivered
     // Realtime insert can't inflate the number.
     const load = async () => {
-      const [all, breaches] = await Promise.all([
-        supabase.from("public_feed").select("id", { count: "exact", head: true }),
-        supabase.from("public_feed").select("id", { count: "exact", head: true }).gte("layers_reached", BREACH_LAYERS),
-      ]);
+      // select("*") so the rows themselves say which columns exist: the breaches segment
+      // appears automatically once the `breach` column lands. The exact count keeps the
+      // attacks total right even if the row scan were ever capped.
+      const { data, error, count } = await supabase.from("public_feed").select("*", { count: "exact" }).limit(FEED_SCAN_LIMIT);
       if (cancelled) return;
-      if (all.error || breaches.error || all.count === null || breaches.count === null) {
+      if (error || !data || count === null) {
         // Keep real numbers we already showed; only an unloaded counter becomes unavailable.
         setState((s) => (s.status === "live" ? s : { status: "unavailable" }));
         return;
       }
-      setState({ status: "live", attacks: all.count, breaches: breaches.count });
+      setState({ status: "live", counts: feedCounts(data, count) });
     };
 
     const channel = supabase
@@ -69,7 +71,7 @@ export function LiveCounter() {
       {state.status === "live" ? (
         <>
           <span className="atk-live-dot" aria-hidden="true" />
-          <span className="num font-medium">{counterText(state.attacks, state.breaches)}</span>
+          <span className="num font-medium">{counterText(state.counts)}</span>
           <span className="visually-hidden">so far, updating live</span>
         </>
       ) : state.status === "loading" ? (

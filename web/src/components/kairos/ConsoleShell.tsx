@@ -16,6 +16,7 @@ import type { OkResponse } from "@/lib/types/kairos";
 import { DISCLAIMER_TEXT } from "./Disclaimer";
 import { AnalystDrawer } from "./AnalystDrawer";
 import { KillSwitch } from "./KillSwitch";
+import { ApprovalsNavLink, PendingApprovalsBanner, usePendingApprovals } from "./PendingApprovals";
 
 /** The section tabs. `pathname` is null while it is not known yet (no tab is marked current). */
 function ConsoleTabs({ pathname }: { pathname: string | null }) {
@@ -54,9 +55,23 @@ function CurrentConsoleTabs() {
 
 /**
  * The frame itself, with no data or session wiring, so it can be rendered anywhere.
- * `killSwitch` and `account` fill the right side of the top bar.
+ * `killSwitch` and `account` fill the right side of the top bar; `approvals` is the
+ * Approvals link + badge (approver-role accounts only) and `banner` sits at the top of
+ * the page content, where it can never cover the kill switch or the nav.
  */
-export function ConsoleFrame({ killSwitch, account, children }: { killSwitch: ReactNode; account: ReactNode; children: ReactNode }) {
+export function ConsoleFrame({
+  killSwitch,
+  account,
+  approvals,
+  banner,
+  children,
+}: {
+  killSwitch: ReactNode;
+  account: ReactNode;
+  approvals?: ReactNode;
+  banner?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div data-theme="soc" className="flex min-h-full flex-1 flex-col bg-paper text-ink">
       <a
@@ -80,6 +95,7 @@ export function ConsoleFrame({ killSwitch, account, children }: { killSwitch: Re
             <CurrentConsoleTabs />
           </Suspense>
           <div className="ml-auto flex h-12 items-center gap-2 sm:gap-3">
+            {approvals}
             <span className="hidden sm:inline-flex">
               <AnalystDrawer />
             </span>
@@ -89,6 +105,7 @@ export function ConsoleFrame({ killSwitch, account, children }: { killSwitch: Re
         </div>
       </header>
       <main id="main" className="w-full flex-1 px-3 py-4 sm:px-5 sm:py-5">
+        {banner}
         {children}
       </main>
       <footer className="on-graphite z-[200] border-t border-rule sm:sticky sm:bottom-0">
@@ -100,7 +117,12 @@ export function ConsoleFrame({ killSwitch, account, children }: { killSwitch: Re
 
 /** ConsoleFrame wired to the signed-in user: the kill switch calls the API as them. */
 export function ConsoleShell({ children }: { children: ReactNode }) {
-  const { api } = useAuth();
+  const { api, roles } = useAuth();
+
+  // Only approver-role accounts get the Approvals link, badge and banner. red_team can't
+  // reach the console anyway (roleRedirect), but the guard keeps the rule in one place.
+  const isApprover = (roles?.includes("approver") ?? false) && !(roles?.includes("red_team") ?? false);
+  const pending = usePendingApprovals(isApprover);
 
   const freezeAllAgents = useCallback(async () => {
     const res = await api<OkResponse>("/killswitch", { method: "POST" });
@@ -108,7 +130,12 @@ export function ConsoleShell({ children }: { children: ReactNode }) {
   }, [api]);
 
   return (
-    <ConsoleFrame killSwitch={<KillSwitch onFreeze={freezeAllAgents} />} account={<AccountMenu tone="graphite" emailFrom="xl" />}>
+    <ConsoleFrame
+      killSwitch={<KillSwitch onFreeze={freezeAllAgents} />}
+      account={<AccountMenu tone="graphite" emailFrom="xl" />}
+      approvals={isApprover ? <ApprovalsNavLink pending={pending} /> : null}
+      banner={isApprover ? <PendingApprovalsBanner pending={pending} /> : null}
+    >
       {children}
     </ConsoleFrame>
   );

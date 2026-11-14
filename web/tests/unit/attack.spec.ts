@@ -18,6 +18,7 @@ import {
   classifyError,
   counterText,
   deliveryFor,
+  feedCounts,
   generateCodename,
   isCodename,
   ladderIndex,
@@ -170,10 +171,76 @@ test("classifyError is honest about offline, busy and rejected", () => {
   expect(classifyError(new ApiError(422, "validation_error", "message too long"))).toEqual({ kind: "rejected", message: "message too long" });
 });
 
-test("counterText pluralises", () => {
-  expect(counterText(47, 0)).toBe("47 attacks, 0 breaches");
-  expect(counterText(1, 1)).toBe("1 attack, 1 breach");
-  expect(counterText(1200, 0)).toBe("1,200 attacks, 0 breaches");
+// ---- live counter (public_feed rows -> attacks / stopped / breaches) ----
+
+/** A public_feed row as it exists today (no breach column). layers_reached is noise on purpose. */
+const feedRow = (verdict: string, extra: Record<string, unknown> = {}) => ({
+  id: "00000000-0000-0000-0000-000000000000",
+  created_at: "2026-11-14T12:00:00Z",
+  nickname: "Agent Falcon 27",
+  attack_type: "trick_ai",
+  verdict,
+  layers_reached: 5, // all layers "passed" on a harmless answer; must NEVER read as a breach
+  technique: null,
+  summary: "filtered summary",
+  ...extra,
+});
+
+test("feedCounts: attacks is every row, stopped is blocked or flagged verdicts", () => {
+  const rows = [
+    ...Array.from({ length: 20 }, () => feedRow("blocked")),
+    ...Array.from({ length: 15 }, () => feedRow("flagged")),
+    ...Array.from({ length: 8 }, () => feedRow("allowed")),
+  ];
+  expect(feedCounts(rows)).toEqual({ attacks: 43, stopped: 35, breaches: null });
+});
+
+test("without a breach field there is no breaches figure, whatever the layers say", () => {
+  // Every row reached all 5 layers (feedRow sets layers_reached: 5): the old inference would
+  // have screamed "43 breaches". The counter must show two honest segments instead.
+  const rows = [
+    ...Array.from({ length: 35 }, () => feedRow("blocked", { layers_reached: 5 })),
+    ...Array.from({ length: 8 }, () => feedRow("allowed", { layers_reached: 5 })),
+  ];
+  const counts = feedCounts(rows);
+  expect(counts.breaches).toBeNull();
+  expect(counterText(counts)).toBe("43 attacks · 35 stopped");
+});
+
+test("breaches counts rows with breach === true, and only that", () => {
+  const rows = [
+    ...Array.from({ length: 35 }, () => feedRow("blocked", { breach: false })),
+    ...Array.from({ length: 7 }, () => feedRow("allowed", { breach: false, layers_reached: 5 })),
+    feedRow("allowed", { breach: true, layers_reached: 2 }), // breach even at 2 layers: field wins
+  ];
+  const counts = feedCounts(rows);
+  expect(counts).toEqual({ attacks: 43, stopped: 35, breaches: 1 });
+  expect(counterText(counts)).toBe("43 attacks · 35 stopped · 1 breach");
+  // All-false breach column is an honest 0, not an omitted segment.
+  const clean = feedCounts(rows.slice(0, 42));
+  expect(clean.breaches).toBe(0);
+  expect(counterText(clean)).toBe("42 attacks · 35 stopped · 0 breaches");
+});
+
+test("only a real boolean breach field is trusted (strings and nulls are not the column)", () => {
+  expect(feedCounts([feedRow("allowed", { breach: "true" })]).breaches).toBeNull();
+  expect(feedCounts([feedRow("allowed", { breach: null })]).breaches).toBeNull();
+  expect(feedCounts([feedRow("allowed", { breach: 1 })]).breaches).toBeNull();
+});
+
+test("a partial scan shows only the exact attacks total, never guessed figures", () => {
+  expect(feedCounts([feedRow("blocked")], 5)).toEqual({ attacks: 5, stopped: null, breaches: null });
+  expect(counterText(feedCounts([feedRow("blocked")], 5))).toBe("5 attacks");
+  // A stale/garbage total never shrinks below what we actually scanned.
+  expect(feedCounts([feedRow("blocked"), feedRow("allowed")], 1).attacks).toBe(2);
+  expect(feedCounts([], 0)).toEqual({ attacks: 0, stopped: 0, breaches: null });
+});
+
+test("counterText pluralises and stays phone-width short", () => {
+  expect(counterText({ attacks: 1, stopped: 0, breaches: 1 })).toBe("1 attack · 0 stopped · 1 breach");
+  expect(counterText({ attacks: 1200, stopped: 1199, breaches: 0 })).toBe("1,200 attacks · 1,199 stopped · 0 breaches");
+  expect(counterText({ attacks: 47, stopped: 12, breaches: null })).toBe("47 attacks · 12 stopped");
+  expect(counterText({ attacks: 47, stopped: null, breaches: null })).toBe("47 attacks");
 });
 
 test("ready-made tricks fit the limit and never name a real domain", () => {

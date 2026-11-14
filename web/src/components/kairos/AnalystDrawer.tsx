@@ -2,7 +2,7 @@
 
 // OWNER: Jordan (P4). AI analyst chat drawer (should-have): opens from any console page,
 // asks POST /analyst/ask {question} -> {answer, citations[]}, shows the answer with clickable
-// citations (MITRE ids link to the official page; event ids are plain labels).
+// citations (MITRE ids link to the official page; event ids are compact E1, E2, … labels).
 //
 // The analyst is read-only and its answers are built from attacker-influenced event text, so
 // the answer renders as plain text and citation links are only built from validated MITRE ids.
@@ -11,13 +11,19 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button, Field, IconExternal, IconSpark, IconX, Spinner, cn } from "@/components/ui";
 import { ApiError } from "@/lib/api";
+import { labelEventCitations } from "@/lib/analystText";
 import { classifyCitation } from "@/lib/incidents";
+import { AnalystAnswer } from "./AnalystAnswer";
 import type { AnalystAskResponse } from "@/lib/types/kairos";
 
 type Turn = { question: string; answer: string; citations: string[] } | { question: string; error: string };
 
 function Citations({ citations }: { citations: string[] }) {
   if (citations.length === 0) return null;
+  // The event-id list comes separately from the answer, so cited events read as E1, E2, …
+  // in order of appearance (full id in the tooltip). They stay non-link chips: a bare event
+  // id has no page of its own to honestly link to (the payload carries no incident id).
+  const eventLabels = labelEventCitations(citations);
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
       {citations.map((c) => {
@@ -39,8 +45,13 @@ function Citations({ citations }: { citations: string[] }) {
           );
         }
         return (
-          <span key={c} className={cn(cls, "bg-paper-3 text-ink-2")} title="Event cited by the analyst">
-            {cite.raw}
+          <span
+            key={c}
+            className={cn(cls, "bg-paper-3 text-ink-2")}
+            title={cite.raw}
+            aria-label={`${eventLabels.get(cite.raw) ?? cite.raw}, event ${cite.raw} cited by the analyst`}
+          >
+            {eventLabels.get(cite.raw) ?? cite.raw}
           </span>
         );
       })}
@@ -143,7 +154,7 @@ export function AnalystDrawer() {
                       </p>
                     ) : (
                       <div className="rounded-[var(--radius-input)] rounded-bl-sm bg-paper-2 px-3 py-2">
-                        <p className="whitespace-pre-line text-sm text-ink">{t.answer}</p>
+                        <AnalystAnswer text={t.answer} className="text-sm text-ink" />
                         <Citations citations={t.citations} />
                       </div>
                     )}

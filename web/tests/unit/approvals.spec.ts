@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { canDecide, isPastDeadline, nextDeadline, shownStatus } from "../../src/lib/approvals";
+import {
+  asApprovalRow,
+  canDecide,
+  isPastDeadline,
+  nextDeadline,
+  pendingApprovals,
+  shownStatus,
+  upsertApproval,
+  type ApprovalRow,
+} from "../../src/lib/approvals";
 
 const NOW = Date.parse("2026-11-14T12:00:00Z");
 const PAST = "2026-11-14T11:59:00Z";
@@ -46,4 +55,80 @@ test("nextDeadline picks the earliest future deadline among pending rows only", 
       NOW,
     ),
   ).toBe(Date.parse(FUTURE));
+});
+
+// ---------------------------------------------------------------------------------------
+// Pending selection for the console's Approvals badge + banner (one shared subscription).
+// ---------------------------------------------------------------------------------------
+
+const row = (over: Partial<ApprovalRow>): ApprovalRow => ({
+  id: "ap-1",
+  created_at: "2026-11-14T11:50:00Z",
+  incident_id: "inc-1",
+  status: "pending",
+  summary: "Lock j.smith's account?",
+  decided_by: null,
+  decided_at: null,
+  expires_at: null,
+  ...over,
+});
+
+test("pendingApprovals keeps only pending rows that are not past their deadline", () => {
+  const rows = [
+    row({ id: "live-no-deadline" }),
+    row({ id: "live-future", expires_at: FUTURE }),
+    row({ id: "past-deadline", expires_at: PAST }),
+    row({ id: "decided", status: "approved" }),
+    row({ id: "expired", status: "expired" }),
+    row({ id: "denied", status: "denied", expires_at: FUTURE }),
+  ];
+  expect(pendingApprovals(rows, NOW).map((a) => a.id)).toEqual(["live-no-deadline", "live-future"]);
+  expect(pendingApprovals([], NOW)).toEqual([]);
+  // The count the badge shows is just the selection's length: same clock, same rows.
+  expect(pendingApprovals(rows, NOW).length).toBe(2);
+});
+
+test("a pending row drops out of the selection the moment its deadline passes", () => {
+  const rows = [row({ id: "a", expires_at: "2026-11-14T12:00:30Z" })];
+  expect(pendingApprovals(rows, NOW).length).toBe(1);
+  expect(pendingApprovals(rows, Date.parse("2026-11-14T12:00:30Z")).length).toBe(0);
+});
+
+test("asApprovalRow accepts a well-shaped row and rejects garbage", () => {
+  const parsed = asApprovalRow({
+    id: "ap-9",
+    created_at: "2026-11-14T11:59:00Z",
+    incident_id: "inc-9",
+    status: "pending",
+    summary: "Freeze the finance agent?",
+    decided_by: null,
+    decided_at: null,
+    expires_at: "2026-11-14T12:05:00Z",
+  });
+  expect(parsed).toEqual({
+    id: "ap-9",
+    created_at: "2026-11-14T11:59:00Z",
+    incident_id: "inc-9",
+    status: "pending",
+    summary: "Freeze the finance agent?",
+    decided_by: null,
+    decided_at: null,
+    expires_at: "2026-11-14T12:05:00Z",
+  });
+  // A row without expires_at still parses (the column is structural, not contractual).
+  expect(asApprovalRow({ id: "x", created_at: "2026-11-14T11:00:00Z", status: "pending", summary: "s" })?.expires_at).toBeNull();
+  expect(asApprovalRow(null)).toBeNull();
+  expect(asApprovalRow("nope")).toBeNull();
+  expect(asApprovalRow({ id: 7, status: "pending", summary: "s", created_at: "t" })).toBeNull();
+});
+
+test("upsertApproval replaces by id and keeps newest first", () => {
+  const a = row({ id: "a", created_at: "2026-11-14T11:00:00Z" });
+  const b = row({ id: "b", created_at: "2026-11-14T11:30:00Z" });
+  const list = upsertApproval(upsertApproval([], a), b);
+  expect(list.map((r) => r.id)).toEqual(["b", "a"]);
+  // An UPDATE for the same id replaces the row instead of duplicating it.
+  const decided = upsertApproval(list, { ...b, status: "approved" });
+  expect(decided.map((r) => r.id)).toEqual(["b", "a"]);
+  expect(decided[0].status).toBe("approved");
 });

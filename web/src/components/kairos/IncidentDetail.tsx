@@ -15,6 +15,7 @@ import { ApiError } from "@/lib/api";
 import { chronological, killChain, scoreBreakdown } from "@/lib/incidents";
 import { ROUTES } from "@/lib/routes";
 import type { IncidentDetail, KairosEvent, Level, Sensor } from "@/lib/types/kairos";
+import { AnalystAnswer } from "./AnalystAnswer";
 import { LEVEL_INK, LEVEL_LABELS, LEVEL_SIGNAL, LevelBadge } from "./LevelBadge";
 import { MitreChip } from "./MitreChip";
 import { Panel } from "./Panel";
@@ -565,9 +566,13 @@ export function IncidentDetailView({ id }: { id: string }) {
                 </span>
               )}
             </div>
-            <p className="max-w-[75ch] whitespace-pre-line text-[0.96875rem] leading-relaxed text-ink">
-              {incident.summary ?? "The analyst hasn't summarized this incident yet. The evidence below is complete without it."}
-            </p>
+            {incident.summary ? (
+              <AnalystAnswer text={incident.summary} className="max-w-[75ch] text-[0.96875rem] leading-relaxed text-ink" />
+            ) : (
+              <p className="max-w-[75ch] text-[0.96875rem] leading-relaxed text-ink">
+                The analyst hasn&apos;t summarized this incident yet. The evidence below is complete without it.
+              </p>
+            )}
             <p className="mt-2 text-sm text-muted">Written by the AI analyst. It can explain and suggest; it can&apos;t act.</p>
           </section>
           <KillChainStrip events={incident.events} />

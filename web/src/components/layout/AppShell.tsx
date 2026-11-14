@@ -5,12 +5,14 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { cn } from "@/components/ui";
-import { ROUTES, canOpen, homeFor } from "@/lib/routes";
+import { ROUTES, canOpen, homeFor, type Role } from "@/lib/routes";
 import { AccountMenu } from "./AccountMenu";
 import { Wordmark } from "./Wordmark";
 
-export const NAV_ITEMS = [
+export const NAV_ITEMS: { href: string; label: string; role?: Role }[] = [
   { href: ROUTES.console, label: "Console" },
+  // Only accounts that can actually decide see the Approvals destination.
+  { href: ROUTES.approve, label: "Approvals", role: "approver" },
   { href: ROUTES.redteam, label: "Red Team" },
 ];
 
@@ -23,7 +25,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { roles } = useAuth();
   // Links appear once roles are known, so a red_team account never flashes console links.
-  const links = roles === null ? [] : NAV_ITEMS.filter((item) => canOpen(item.href, roles));
+  // An item's `role` further limits it to accounts holding that role (canOpen alone would
+  // show Approvals to every console account; only approvers can act there).
+  const links =
+    roles === null ? [] : NAV_ITEMS.filter((item) => canOpen(item.href, roles) && (!item.role || roles.includes(item.role)));
 
   return (
     <div className="flex min-h-full flex-1 flex-col">

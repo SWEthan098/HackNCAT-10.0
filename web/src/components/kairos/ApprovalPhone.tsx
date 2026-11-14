@@ -13,37 +13,21 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { Alert, Button, EmptyState, IconAlert, IconCheck, IconPulse, LoadingState, cn } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { createAlarm, keepScreenOn, type Alarm, type WakeState } from "@/lib/approvalAlarm";
-import { canDecide, nextDeadline, shownStatus } from "@/lib/approvals";
+import {
+  APPROVAL_COLUMNS,
+  asApprovalRow,
+  canDecide,
+  nextDeadline,
+  shownStatus,
+  upsertApproval,
+  type ApprovalRow,
+} from "@/lib/approvals";
 import { createClient } from "@/lib/supabase/client";
 import type { Approval } from "@/lib/types/kairos";
 
-export type ApprovalRow = Approval & { expires_at?: string | null };
+// Row shape + parsing live in lib/approvals.ts, shared with the console's Approvals badge.
+export type { ApprovalRow } from "@/lib/approvals";
 export type Decision = "approve" | "deny";
-
-const COLUMNS = "id, created_at, incident_id, status, summary, decided_by, decided_at, expires_at";
-
-function asApproval(row: unknown): ApprovalRow | null {
-  if (typeof row !== "object" || row === null) return null;
-  const r = row as Record<string, unknown>;
-  if (typeof r.id !== "string" || typeof r.status !== "string" || typeof r.summary !== "string" || typeof r.created_at !== "string") {
-    return null;
-  }
-  return {
-    id: r.id,
-    created_at: r.created_at,
-    incident_id: typeof r.incident_id === "string" ? r.incident_id : "",
-    status: r.status as Approval["status"],
-    summary: r.summary,
-    decided_by: typeof r.decided_by === "string" ? r.decided_by : null,
-    decided_at: typeof r.decided_at === "string" ? r.decided_at : null,
-    expires_at: typeof r.expires_at === "string" ? r.expires_at : null,
-  };
-}
-
-function upsert(list: ApprovalRow[], row: ApprovalRow): ApprovalRow[] {
-  const rest = list.filter((a) => a.id !== row.id);
-  return [row, ...rest].sort((a, b) => b.created_at.localeCompare(a.created_at));
-}
 
 function decisionError(e: unknown): string {
   if (e instanceof ApiError) {
@@ -347,7 +331,7 @@ export function ApprovalPhone() {
 
     supabase
       .from("approvals")
-      .select(COLUMNS)
+      .select(APPROVAL_COLUMNS)
       .order("created_at", { ascending: false })
       .limit(20)
       .then(({ data, error }) => {
@@ -356,15 +340,15 @@ export function ApprovalPhone() {
           setLoadError(error?.message ?? "The request list didn't load.");
           return;
         }
-        const rows = data.map(asApproval).filter((a): a is ApprovalRow => a !== null);
-        setApprovals((prev) => rows.reduce(upsert, prev ?? []));
+        const rows = data.map(asApprovalRow).filter((a): a is ApprovalRow => a !== null);
+        setApprovals((prev) => rows.reduce(upsertApproval, prev ?? []));
         setBaseline(new Set(rows.map((a) => a.id)));
         setLoadError(null);
       });
 
     const onRow = (payload: { new: unknown }) => {
-      const row = asApproval(payload.new);
-      if (row && !cancelled) setApprovals((list) => upsert(list ?? [], row));
+      const row = asApprovalRow(payload.new);
+      if (row && !cancelled) setApprovals((list) => upsertApproval(list ?? [], row));
     };
     const channel = supabase
       .channel("approvals-phone")
@@ -385,8 +369,8 @@ export function ApprovalPhone() {
   const decide = useCallback(
     async (id: string, decision: Decision) => {
       const result = await api<Approval>(`/approvals/${encodeURIComponent(id)}/${decision}`, { method: "POST" });
-      const row = asApproval(result);
-      if (row) setApprovals((list) => upsert(list ?? [], row));
+      const row = asApprovalRow(result);
+      if (row) setApprovals((list) => upsertApproval(list ?? [], row));
       return row ?? (result as ApprovalRow);
     },
     [api],

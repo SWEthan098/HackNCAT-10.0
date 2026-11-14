@@ -54,6 +54,7 @@ _MITRE_KEYS: dict[str, list[str]] = {
 }
 
 RULE_FLAG_THRESHOLD = 0.5
+SENDS_SENSITIVE = "asks to send payroll or files"
 MAX_MODEL_CHARS = 4000
 MODEL_OUTPUT_TOKENS = 600  # reasoning models spend tokens before the short JSON answer
 ALLOWED_DOMAIN = "cisco.example"
@@ -124,9 +125,9 @@ RULES: tuple[Rule, ...] = (
         r"[^.\n]{0,40}?\b(?:passwords?|api keys?|credentials|secrets?)\b",
     ),
     _rule(
-        "tries to send payroll or files somewhere",
+        SENDS_SENSITIVE,
         EXFILTRATION,
-        0.6,
+        0.3,  # on its own this is ordinary work; apply_rules raises it when the recipient is outside
         r"\b(?:send|forward|email|mail|upload|post|share|attach|cc|bcc)\b[^.\n]{0,80}?"
         r"\b(?:payroll|salar(?:y|ies)|bank account|ssn|social security|full contents|entire (?:file|contents)|/shared/)",
     ),
@@ -212,7 +213,13 @@ def apply_rules(text: str) -> RuleResult:
             hits.append((rule.weight, rule.technique, rule.name))
     outside = [d for d in _EMAIL.findall(text) if d.lower() != ALLOWED_DOMAIN]
     if outside and _SEND_VERB.search(text):
-        hits.append((0.4, EXFILTRATION, f"asks to send something outside {ALLOWED_DOMAIN}"))
+        sensitive = any(name == SENDS_SENSITIVE for _, _, name in hits)
+        if sensitive:
+            # Flagged, but below the firewall's layer-1 block line (0.7): a plain request to send
+            # data out is caught deeper, by the hard rules, not by the scanner alone.
+            hits.append((0.6, EXFILTRATION, f"sends payroll or files outside {ALLOWED_DOMAIN}"))
+        else:
+            hits.append((0.4, EXFILTRATION, f"asks to send something outside {ALLOWED_DOMAIN}"))
     hidden = False
     if not any(w >= 0.7 for w, _, _ in hits):
         squashed = re.sub(r"[^a-z0-9]", "", text.lower())

@@ -42,7 +42,7 @@ async def launch(body: PlaygroundLaunchRequest, request: Request, db=Depends(_db
     wait = limiter.check(_device(request))
     if wait:
         raise AppError(429, "rate_limited", f"The defenders are busy, retry in {wait}s")
-    result = await playground.launch(body.attack_type, body.settings, body.nickname, db=db)
+    result = await playground.launch(body.attack_type, body.settings, body.nickname, db=db, request=request)
     return PlaygroundLaunchResponse(
         log_lines=result.log_lines,
         outcome=result.outcome,

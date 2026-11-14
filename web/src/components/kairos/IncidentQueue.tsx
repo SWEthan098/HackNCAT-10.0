@@ -12,13 +12,15 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { Button, EmptyState, ErrorState, LoadingState, cn, useToast } from "@/components/ui";
+import { Button, EmptyState, ErrorState, IconChevronRight, LoadingState, cn, useToast } from "@/components/ui";
 import { ApiError } from "@/lib/api";
-import { STATUS_LABELS, asIncident, filterIncidents, sortIncidents, upsertIncident } from "@/lib/incidents";
+import { asIncident, filterIncidents, sortIncidents, upsertIncident } from "@/lib/incidents";
 import { createClient } from "@/lib/supabase/client";
 import type { Appeal, Incident, Source } from "@/lib/types/kairos";
-import { LevelBadge } from "./LevelBadge";
+import { LEVEL_INK, LEVEL_LABELS } from "./LevelBadge";
 import { MitreChip } from "./MitreChip";
+import { Panel } from "./Panel";
+import { StatusChip } from "./StatusChip";
 
 const SOURCES: Array<{ value: Source | "all"; label: string }> = [
   { value: "all", label: "All sources" },
@@ -32,24 +34,46 @@ function IncidentRow({ incident }: { incident: Incident }) {
     <li>
       <Link
         href={`/console/incidents/${incident.id}`}
-        className="grid grid-cols-[auto_1fr] items-start gap-x-3 gap-y-1 rounded-card border border-rule bg-paper px-4 py-3 no-underline shadow-card transition-colors hover:border-rule-2 hover:bg-paper-2"
+        className={cn(
+          "relative grid grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-x-3 py-3 pl-4 pr-3.5 no-underline sm:grid-cols-[4rem_minmax(0,1fr)_auto] sm:pr-4",
+          "transition-colors hover:bg-paper-3 focus-visible:-outline-offset-2",
+          // The level edge: the first thing the eye catches when scanning the queue.
+          "before:absolute before:inset-y-0 before:left-0 before:w-1",
+          LEVEL_EDGE[incident.level],
+        )}
       >
-        <LevelBadge level={incident.level} risk={incident.risk} className="mt-0.5" />
+        <span className="flex flex-col items-start">
+          <span className={cn("num font-display text-[1.75rem] font-semibold leading-none", LEVEL_INK[incident.level])}>{incident.risk}</span>
+          <span className={cn("mt-1 text-xs font-medium", LEVEL_INK[incident.level])}>{LEVEL_LABELS[incident.level]}</span>
+        </span>
         <span className="min-w-0">
-          <span className="block truncate font-medium text-ink">{incident.title}</span>
-          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-2">
-            <span>{STATUS_LABELS[incident.status] ?? incident.status}</span>
+          <span className="line-clamp-2 text-[0.96875rem] font-medium leading-snug text-ink">{incident.title}</span>
+          <span className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm text-ink-2">
+            <StatusChip status={incident.status} />
             <span className="text-muted">{incident.source === "audience" ? "Audience attacker" : "Scripted chain"}</span>
-            <span className="num text-xs text-muted">
+            <span className="num font-mono text-[0.8125rem] text-muted sm:hidden">
               {new Date(incident.created_at).toLocaleTimeString(undefined, { hour12: false, hour: "2-digit", minute: "2-digit" })}
             </span>
             {topTechnique && <MitreChip tag={topTechnique} />}
           </span>
         </span>
+        <span className="hidden items-center gap-2 pt-0.5 sm:flex">
+          <span className="num font-mono text-[0.8125rem] text-muted">
+            {new Date(incident.created_at).toLocaleTimeString(undefined, { hour12: false, hour: "2-digit", minute: "2-digit" })}
+          </span>
+          <IconChevronRight size={16} className="text-muted" />
+        </span>
       </Link>
     </li>
   );
 }
+
+const LEVEL_EDGE: Record<Incident["level"], string> = {
+  low: "before:bg-level-low",
+  medium: "before:bg-level-medium",
+  high: "before:bg-level-high",
+  critical: "before:bg-level-critical",
+};
 
 export function IncidentQueue() {
   const { api } = useAuth();
@@ -129,38 +153,45 @@ export function IncidentQueue() {
     : null;
   const filtered = source !== "all" || appealsOnly;
 
-  return (
-    <section aria-label="Incident queue">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div role="group" aria-label="Source filter" className="flex rounded-input bg-paper-3 p-0.5">
-          {SOURCES.map((s) => (
-            <button
-              key={s.value}
-              type="button"
-              aria-pressed={source === s.value}
-              onClick={() => setFilter("source", s.value === "all" ? null : s.value)}
-              className={cn(
-                "rounded-[5px] px-2.5 py-1 text-sm transition-colors",
-                source === s.value ? "bg-paper font-medium text-ink shadow-card" : "text-ink-2 hover:text-ink",
-              )}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          aria-pressed={appealsOnly}
-          onClick={() => setFilter("appeals", appealsOnly ? null : "1")}
-          className={cn(
-            "rounded-input border px-2.5 py-1 text-sm transition-colors",
-            appealsOnly ? "border-accent-2 bg-accent-wash font-medium text-accent-deep" : "border-rule text-ink-2 hover:bg-paper-2 hover:text-ink",
-          )}
-        >
-          With appeals
-        </button>
+  const filters = (
+    <>
+      <div role="group" aria-label="Source filter" className="flex rounded-input bg-paper p-0.5 ring-1 ring-inset ring-rule">
+        {SOURCES.map((s) => (
+          <button
+            key={s.value}
+            type="button"
+            aria-pressed={source === s.value}
+            onClick={() => setFilter("source", s.value === "all" ? null : s.value)}
+            className={cn(
+              "rounded-[3px] px-2.5 py-1 text-sm transition-colors",
+              source === s.value ? "bg-paper-3 font-medium text-ink" : "text-muted hover:text-ink",
+            )}
+          >
+            {s.label}
+          </button>
+        ))}
       </div>
+      <button
+        type="button"
+        aria-pressed={appealsOnly}
+        onClick={() => setFilter("appeals", appealsOnly ? null : "1")}
+        className={cn(
+          "rounded-input border px-2.5 py-1 text-sm transition-colors",
+          appealsOnly ? "border-accent bg-accent-wash font-medium text-accent-deep" : "border-rule text-muted hover:bg-paper-3 hover:text-ink",
+        )}
+      >
+        With appeals
+      </button>
+    </>
+  );
 
+  return (
+    <Panel
+      title="Incident queue"
+      meta={visible ? <span className="num">{visible.length === 1 ? "1 incident" : `${visible.length} incidents`}{visible.length > 1 && ", highest risk first"}</span> : undefined}
+      actions={filters}
+      bodyClassName={visible && visible.length > 0 && !error && !(appealsOnly && appealsError) ? "p-0" : "p-3.5 sm:p-4"}
+    >
       {error ? (
         <ErrorState title="Couldn't load incidents" message={error} onRetry={load} />
       ) : !visible ? (
@@ -187,12 +218,12 @@ export function IncidentQueue() {
           }
         />
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col divide-y divide-rule">
           {visible.map((i) => (
             <IncidentRow key={i.id} incident={i} />
           ))}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 }

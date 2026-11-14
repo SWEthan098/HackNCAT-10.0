@@ -8,11 +8,13 @@
 // text only. No markdown, no images, no links.
 
 import { useEffect, useRef, useState } from "react";
-import { Button, EmptyState, IconPulse, LoadingState } from "@/components/ui";
+import { Button, EmptyState, IconPulse, LoadingState, cn } from "@/components/ui";
 import { addEvent, demoEvent, isKairosEvent } from "@/lib/liveEvents";
 import { createClient } from "@/lib/supabase/client";
 import type { KairosEvent, Sensor } from "@/lib/types/kairos";
 import { LevelBadge } from "./LevelBadge";
+import { Panel } from "./Panel";
+import { SensorIcon } from "./SensorIcon";
 
 const SENSOR_LABELS: Record<Sensor, string> = {
   login_guard: "Login Guard",
@@ -116,65 +118,80 @@ function useLiveEvents() {
   };
 }
 
+const VERDICT_TONES: Record<KairosEvent["verdict"], string> = {
+  blocked: "font-semibold text-error",
+  flagged: "font-medium text-level-medium-ink",
+  allowed: "text-muted",
+};
+
 function EventRow({ event }: { event: KairosEvent }) {
   const technique = event.mitre[0]?.technique_id;
   return (
-    <li className="grid grid-cols-[auto_auto_1fr] items-baseline gap-x-3 gap-y-1 border-b border-rule px-1 py-2.5 last:border-b-0">
-      <span className="num text-xs text-muted">{new Date(event.created_at).toLocaleTimeString(undefined, { hour12: false })}</span>
-      <LevelBadge level={event.level} risk={event.risk} />
-      <div className="min-w-0">
-        <p className="text-sm">
-          <span className="text-muted">{SENSOR_LABELS[event.sensor] ?? event.sensor}</span>{" "}
-          <span className="font-medium">
-            {event.actor} → {event.target}
-          </span>{" "}
-          <span className={event.verdict === "blocked" ? "font-medium text-error" : "text-ink-2"}>{event.verdict}</span>
-          {technique && <span className="ml-2 font-mono text-xs text-muted">{technique}</span>}
-        </p>
-        <p className="mt-0.5 text-sm text-ink-2">{event.reason}</p>
+    <li className="flex flex-col gap-1 px-3.5 py-2.5 sm:px-4">
+      <div className="flex items-center gap-2">
+        <span className="num font-mono text-[0.8125rem] text-muted">
+          {new Date(event.created_at).toLocaleTimeString(undefined, { hour12: false })}
+        </span>
+        <LevelBadge level={event.level} risk={event.risk} />
+        <span className={cn("ml-auto text-sm", VERDICT_TONES[event.verdict] ?? "text-ink-2")}>{event.verdict}</span>
       </div>
+      <p className="flex items-center gap-x-2 text-sm text-ink-2">
+        <SensorIcon sensor={event.sensor} size={15} className="text-muted" />
+        {SENSOR_LABELS[event.sensor] ?? event.sensor}
+        {technique && <span className="ml-auto font-mono text-[0.8125rem] text-muted">{technique}</span>}
+      </p>
+      <p className="break-all font-mono text-[0.8125rem] text-ink">
+        {event.actor} <span className="text-muted">→</span> {event.target}
+      </p>
+      <p className="text-sm leading-snug text-ink-2">{event.reason}</p>
     </li>
   );
 }
 
-export function LiveEventFeed() {
+export function LiveEventFeed({ className }: { className?: string }) {
   const { events, status, retry } = useLiveEvents();
   // The screen-reader announcement and the visible label stay one thing.
   const statusLabel =
     status === "live" ? "Live" : status === "demo" ? "Demo data" : status === "reconnecting" ? "Reconnecting…" : "Connecting…";
 
   return (
-    <section aria-label="Live events">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2>Live events</h2>
-        <p className="flex items-center gap-1.5 text-sm text-muted" role="status">
+    <Panel
+      title="Live events"
+      className={className}
+      meta={
+        <p className={cn("flex items-center gap-1.5", status === "live" && "text-ink-2", status === "demo" && "font-medium text-level-medium-ink")} role="status">
           <IconPulse size={16} className={status === "live" ? "text-accent" : undefined} />
           {statusLabel}
         </p>
-      </div>
+      }
+      bodyClassName="flex min-h-0 flex-1 flex-col p-0"
+    >
       {status === "demo" && (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-input border border-rule bg-paper-2 px-3 py-2">
-          <p className="text-sm text-ink-2">Can&apos;t reach the live database, so this shows demo data. Nothing here is real.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-l-2 border-b-rule border-l-level-medium bg-paper-3 px-3.5 py-2 sm:px-4">
+          <p className="text-sm text-ink">Can&apos;t reach the live database, so this shows demo data. Nothing here is real.</p>
           <Button variant="secondary" size="sm" onClick={retry}>
             Try live again
           </Button>
         </div>
       )}
       {!events ? (
-        <LoadingState className="mt-4" label="Connecting to the event stream" />
+        <LoadingState className="p-4" label="Connecting to the event stream" />
       ) : events.length === 0 ? (
         <EmptyState
-          className="mt-4"
+          className="m-3.5 sm:m-4"
           title="No events yet"
           description="The three listeners write events here the moment they see something. Run an attack from the Red Team console to make one."
         />
       ) : (
-        <ul role="log" aria-label="Live events, newest first" className="mt-2">
-          {events.map((e) => (
-            <EventRow key={e.id} event={e} />
-          ))}
-        </ul>
+        // Scrolls on its own when the feed is pinned beside the queue; focusable so keyboards can scroll it.
+        <div tabIndex={0} role="region" aria-label="Live events list" className="min-h-0 flex-1 overflow-y-auto focus-visible:-outline-offset-2">
+          <ul role="log" aria-label="Live events, newest first" className="divide-y divide-rule">
+            {events.map((e) => (
+              <EventRow key={e.id} event={e} />
+            ))}
+          </ul>
+        </div>
       )}
-    </section>
+    </Panel>
   );
 }

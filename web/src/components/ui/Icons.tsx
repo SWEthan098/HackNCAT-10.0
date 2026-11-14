@@ -120,3 +120,15 @@ export const IconSnow = (p: IconProps) => (
     <path d="m9.5 4.5 2.5 2.5 2.5-2.5M9.5 19.5l2.5-2.5 2.5 2.5" />
   </Icon>
 );
+export const IconMail = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3.5 6.5 8.5 6.5 8.5-6.5" />
+  </Icon>
+);
+export const IconShield = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6Z" />
+    <path d="m9 12 2 2 4-4" />
+  </Icon>
+);

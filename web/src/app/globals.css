@@ -3,6 +3,7 @@
  * axes: light/grotesk-sans/cool · posture: restrained · contrast: pass · v2.0.0 */
 /* Hallmark · pre-emit critique: P_ H_ E_ S_ R_ V_ · weakest: E, the starter has no real data yet; every region ships its loading, empty and error states instead */
 /* Hallmark · console shell (/console): graphite top bar, wordmark + section tabs + kill switch key + account menu · footer: one-line disclaimer bar · states: armed, confirming, freezing, frozen, failed */
+/* Hallmark · SOC theme ([data-theme="soc"] in tokens.css, on /console, /approve, sign-in): axes dark/condensed-grotesk/cool · posture: dense · signature: the risk scale on the incident page */
 @import "tailwindcss";
 @import "./tokens.css";
 @import "./base.css";
@@ -22,7 +23,22 @@
   --color-level-high-ink: oklch(46% 0.145 48);
   --color-level-critical-wash: oklch(93.5% 0.05 27);
   --color-level-critical-ink: oklch(46% 0.17 27);
+  /* Solid level signals (row edges, the risk scale, the severity bar). */
+  --color-level-low: oklch(66% 0.015 258);
+  --color-level-medium: oklch(80% 0.15 90);
+  --color-level-high: oklch(70% 0.17 55);
+  --color-level-critical: oklch(56% 0.2 27);
+  /* A red you can fill with (danger keys, the alarm screen) and the ink that sits on it. */
+  --color-error-fill: var(--color-error);
+  --color-on-error-fill: var(--color-accent-ink);
+  /* MITRE frameworks: ATT&CK (people and accounts) vs ATLAS (attacks on AI). */
+  --color-attack-wash: var(--color-accent-wash);
+  --color-attack-ink: var(--color-accent-deep);
+  --color-atlas-wash: var(--color-graphite);
+  --color-atlas-ink: var(--color-graphite-ink);
+  --color-scrim: color-mix(in oklab, var(--color-ink) 40%, transparent);
 }
+
 
 /* Expose the Hallmark tokens as Tailwind utilities (bg-paper, text-ink, border-rule, ...).
  * `inline` makes utilities read the :root token directly, so tokens.css stays the source. */
@@ -49,6 +65,16 @@
   --color-level-high-ink: var(--color-level-high-ink);
   --color-level-critical-wash: var(--color-level-critical-wash);
   --color-level-critical-ink: var(--color-level-critical-ink);
+  --color-level-low: var(--color-level-low);
+  --color-level-medium: var(--color-level-medium);
+  --color-level-high: var(--color-level-high);
+  --color-level-critical: var(--color-level-critical);
+  --color-error-fill: var(--color-error-fill);
+  --color-on-error-fill: var(--color-on-error-fill);
+  --color-attack-wash: var(--color-attack-wash);
+  --color-attack-ink: var(--color-attack-ink);
+  --color-atlas-wash: var(--color-atlas-wash);
+  --color-atlas-ink: var(--color-atlas-ink);
   --color-success: var(--color-success);
   --color-graphite: var(--color-graphite);
   --color-graphite-2: var(--color-graphite-2);
@@ -139,7 +165,7 @@ dialog.modal {
   max-height: min(80dvh, 40rem);
 }
 dialog.modal::backdrop {
-  background: color-mix(in oklab, var(--color-ink) 40%, transparent);
+  background: var(--color-scrim);
 }
 
 .skeleton {

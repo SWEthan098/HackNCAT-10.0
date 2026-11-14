@@ -9,7 +9,7 @@ import { usePathname } from "next/navigation";
 import { Suspense, useCallback, type ReactNode } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { AccountMenu } from "@/components/layout/AccountMenu";
-import { wordmarkClasses } from "@/components/layout/Wordmark";
+import { KairosLockup } from "@/components/layout/Wordmark";
 import { cn } from "@/components/ui";
 import { CONSOLE_SECTIONS, ROUTES, isConsoleSectionActive } from "@/lib/routes";
 import type { OkResponse } from "@/lib/types/kairos";
@@ -21,7 +21,7 @@ function ConsoleTabs({ pathname }: { pathname: string | null }) {
   return (
     <nav
       aria-label="Console sections"
-      className="order-3 -mx-1 flex h-11 w-full overflow-x-auto border-t border-graphite-2 sm:order-none sm:mx-0 sm:h-14 sm:w-auto sm:border-t-0"
+      className="order-3 -mx-4 flex h-10 w-[calc(100%+2rem)] overflow-x-auto border-t border-graphite-2 px-2 sm:order-none sm:mx-0 sm:h-12 sm:w-auto sm:border-t-0 sm:px-0"
     >
       {CONSOLE_SECTIONS.map((item) => {
         const active = pathname !== null && isConsoleSectionActive(pathname, item.href);
@@ -31,10 +31,12 @@ function ConsoleTabs({ pathname }: { pathname: string | null }) {
             href={item.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex h-full shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm no-underline",
+              "relative inline-flex h-full shrink-0 items-center whitespace-nowrap px-3 text-[0.9375rem] no-underline",
+              // The active marker is a bar on the bottom edge, drawn inside the tab.
+              "after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:rounded-full",
               // Not transition-colors: that also fades the focus ring in, and a ring must appear at once.
-              "transition-[color,background-color,border-color] focus-visible:-outline-offset-2 active:bg-graphite-2",
-              active ? "border-accent-2 text-graphite-ink" : "border-transparent text-graphite-muted hover:text-graphite-ink",
+              "transition-[color,background-color] focus-visible:-outline-offset-2 hover:bg-graphite-2/60 active:bg-graphite-2",
+              active ? "font-medium text-graphite-ink after:bg-accent-2" : "text-graphite-muted hover:text-graphite-ink",
             )}
           >
             {item.label}
@@ -55,35 +57,38 @@ function CurrentConsoleTabs() {
  */
 export function ConsoleFrame({ killSwitch, account, children }: { killSwitch: ReactNode; account: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex min-h-full flex-1 flex-col">
+    <div data-theme="soc" className="flex min-h-full flex-1 flex-col bg-paper text-ink">
       <a
         href="#main"
         className="on-paper sr-only rounded-input bg-paper px-3 py-2 focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-[600]"
       >
         Skip to content
       </a>
-      <header className="on-graphite sticky top-0 z-[300]">
-        <div className="mx-auto flex w-full max-w-[var(--container)] flex-wrap items-center gap-x-4 px-4 sm:gap-x-6 sm:px-6">
-          <Link href={ROUTES.console} aria-label="Kairos Defender Console, incidents" className="flex h-14 shrink-0 items-center gap-3 no-underline">
-            <span className={wordmarkClasses}>Kairos</span>
-            <span className="hidden text-sm text-graphite-muted sm:inline">Defender Console</span>
+      <header className="on-graphite sticky top-0 z-[300] border-b border-rule">
+        <div className="flex w-full flex-wrap items-center gap-x-3 px-4 sm:gap-x-5 sm:px-5">
+          <Link
+            href={ROUTES.console}
+            aria-label="Kairos Defender Console, incidents"
+            className="flex h-12 shrink-0 items-center gap-2.5 no-underline focus-visible:-outline-offset-2"
+          >
+            <KairosLockup sub="Defender Console" />
           </Link>
           {/* usePathname can't be known while prerendering a page with a dynamic segment
               (/console/incidents/[id]); without this boundary that page would fail to build. */}
           <Suspense fallback={<ConsoleTabs pathname={null} />}>
             <CurrentConsoleTabs />
           </Suspense>
-          <div className="ml-auto flex h-14 items-center gap-2 sm:gap-3">
+          <div className="ml-auto flex h-12 items-center gap-2 sm:gap-3">
             {killSwitch}
             {account}
           </div>
         </div>
       </header>
-      <main id="main" className="mx-auto w-full max-w-[var(--container)] flex-1 px-4 py-6 sm:px-6">
+      <main id="main" className="w-full flex-1 px-3 py-4 sm:px-5 sm:py-5">
         {children}
       </main>
-      <footer className="z-[200] border-t border-rule bg-paper-2 sm:sticky sm:bottom-0">
-        <p className="mx-auto w-full max-w-[var(--container)] px-4 py-1.5 text-xs text-muted sm:px-6">{DISCLAIMER_TEXT}</p>
+      <footer className="on-graphite z-[200] border-t border-rule sm:sticky sm:bottom-0">
+        <p className="w-full px-4 py-1.5 text-xs text-graphite-muted sm:px-5">{DISCLAIMER_TEXT}</p>
       </footer>
     </div>
   );

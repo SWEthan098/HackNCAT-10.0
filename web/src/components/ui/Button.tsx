@@ -14,7 +14,7 @@ const variants: Record<ButtonVariant, string> = {
   primary: "key key-accent bg-accent text-accent-ink hover:bg-accent-deep",
   secondary: "key bg-key-face text-ink",
   ghost: "text-ink-2 transition-colors hover:bg-paper-2 hover:text-ink active:bg-paper-3",
-  danger: "key key-danger bg-error text-accent-ink",
+  danger: "key key-danger bg-error-fill text-on-error-fill",
 };
 
 const sizes: Record<ButtonSize, string> = {

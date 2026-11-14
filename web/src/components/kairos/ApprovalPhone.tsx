@@ -56,7 +56,7 @@ function decisionError(e: unknown): string {
 
 /** White-on-red controls for the alarm screen: hover darkens, press sinks, disabled dims. */
 const onRedButton =
-  "w-full text-accent-ink transition-colors hover:bg-error-edge active:translate-y-px disabled:cursor-not-allowed disabled:opacity-55";
+  "w-full text-on-error-fill transition-colors hover:bg-error-edge active:translate-y-px disabled:cursor-not-allowed disabled:opacity-55";
 
 const clock = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour12: false, hour: "2-digit", minute: "2-digit" });
 
@@ -168,7 +168,7 @@ export function ApprovalPhoneView({
         // A plain button: the ghost variant's own ink colour would override white-on-red.
         <button
           type="button"
-          className={cn(onRedButton, "h-12 rounded-input border border-accent-ink/70 font-medium")}
+          className={cn(onRedButton, "h-12 rounded-input border border-on-error-fill/70 font-medium")}
           disabled={busy !== null}
           onClick={() => decide(a, "deny")}
         >
@@ -180,7 +180,7 @@ export function ApprovalPhoneView({
         </Button>
       )}
       {errors[a.id] && (
-        <p role="alert" className={cn("text-sm font-medium", onRed ? "text-accent-ink" : "text-error")}>
+        <p role="alert" className={cn("text-sm font-medium", onRed ? "text-on-error-fill" : "text-error")}>
           {errors[a.id]}
         </p>
       )}
@@ -190,7 +190,7 @@ export function ApprovalPhoneView({
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl">Approvals</h1>
+        <h1 className="text-[1.75rem]">Approvals</h1>
         <p role="status" className={cn("flex items-center gap-1.5 text-sm", live === "down" ? "font-medium text-error" : "text-muted")}>
           <IconPulse size={16} className={live === "live" ? "text-accent" : undefined} />
           {live === "live" ? "Live" : live === "down" ? "Not connected" : "Connecting…"}
@@ -204,7 +204,7 @@ export function ApprovalPhoneView({
       )}
 
       {!armed ? (
-        <section aria-label="Alarm setup" className="flex flex-col gap-3 rounded-card border border-rule bg-paper-2 p-4">
+        <section aria-label="Alarm setup" className="flex flex-col gap-3 rounded-card border border-rule border-l-2 border-l-accent bg-paper-2 p-4">
           <p className="text-ink">
             Tap below so this phone can ring out loud and keep its screen on. Phones block sound until you tap.
           </p>
@@ -214,7 +214,7 @@ export function ApprovalPhoneView({
           {soundUnavailable && <p className="text-sm text-error">This browser can&apos;t play the alarm sound. The red screen still shows.</p>}
         </section>
       ) : (
-        <section aria-label="Alarm status" className="flex flex-col gap-2 rounded-card border border-rule bg-paper p-4 text-sm">
+        <section aria-label="Alarm status" className="flex flex-col gap-2 rounded-card border border-rule bg-paper-2 p-4 text-sm">
           <p className="flex items-center gap-2">
             <IconCheck size={16} className="text-success" /> Alarm sound is on. Keep the volume up.
           </p>
@@ -243,12 +243,20 @@ export function ApprovalPhoneView({
           <EmptyState title="No requests yet" description="When Kairos needs a human decision, it appears here and this phone rings." />
         ) : (
           approvals.map((a) => (
-            <article key={a.id} className={cn("rounded-card border p-4", a.status === "pending" ? "border-error/50 bg-paper" : "border-rule bg-paper-2")}>
-              <p className="mb-2 text-sm text-muted">
-                {a.status === "pending" ? "Waiting for you" : a.status === "approved" ? "Approved" : a.status === "denied" ? "Denied" : "Expired"}
-                <span className="num"> {clock(a.decided_at ?? a.created_at)}</span>
+            <article
+              key={a.id}
+              className={cn(
+                "rounded-card border p-4",
+                a.status === "pending" ? "border-error/60 border-l-4 border-l-level-critical bg-paper-2" : "border-rule bg-paper",
+              )}
+            >
+              <p className="mb-2 flex items-center justify-between gap-2 text-sm">
+                <span className={a.status === "pending" ? "font-semibold text-level-critical-ink" : "font-medium text-ink-2"}>
+                  {a.status === "pending" ? "Waiting for you" : a.status === "approved" ? "Approved" : a.status === "denied" ? "Denied" : "Expired"}
+                </span>
+                <span className="num font-mono text-[0.8125rem] text-muted">{clock(a.decided_at ?? a.created_at)}</span>
               </p>
-              <p className="whitespace-pre-line text-ink">{a.summary}</p>
+              <p className={cn("whitespace-pre-line", a.status === "pending" ? "text-[1.0625rem] leading-relaxed text-ink" : "text-ink-2")}>{a.summary}</p>
               {a.status === "pending" && <div className="mt-4">{decisionButtons(a, false)}</div>}
               {a.status === "expired" && (
                 <p className="mt-2 text-sm text-ink-2">Nobody answered in time. Held actions stay held, and nobody was locked out.</p>
@@ -265,14 +273,14 @@ export function ApprovalPhoneView({
           e.preventDefault();
           dismiss();
         }}
-        className="m-0 h-dvh max-h-none w-screen max-w-none bg-error p-0 text-accent-ink backdrop:bg-error [--color-focus:var(--color-accent-ink)]"
+        className="m-0 h-dvh max-h-none w-screen max-w-none bg-error-fill p-0 text-on-error-fill backdrop:bg-error-fill [--color-focus:var(--color-on-error-fill)]"
       >
         <div className="mx-auto flex min-h-full max-w-lg flex-col justify-between gap-6 px-5 py-8">
           <div className="flex flex-col gap-4">
             <p className="flex items-center gap-2 text-lg font-medium">
               <IconAlert size={28} /> {testing ? "Test alarm" : "Approval needed"}
             </p>
-            <h2 id="alarm-title" className="max-w-none text-3xl text-accent-ink">
+            <h2 id="alarm-title" className="max-w-none text-[2.25rem] leading-[1.05] text-on-error-fill">
               {testing ? "This is how a real request looks and sounds" : "Kairos is asking you to decide"}
             </h2>
             <p className="whitespace-pre-line text-lg">

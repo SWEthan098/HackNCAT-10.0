@@ -121,7 +121,7 @@ export default function LoginPage() {
       <Suspense>
         <LoginForm />
       </Suspense>
-      <p className="mt-6 border-t border-rule pt-4 text-xs text-muted">
+      <p className="mt-6 border-t border-rule pt-4 text-sm leading-relaxed text-muted">
         Kairos Login Guard checks each sign-in attempt using only the account email, when it
         happened, and how long this form was open. It never records your password, what you
         type, or how you type it. Raw signal data is deleted after 24 hours; only scores are

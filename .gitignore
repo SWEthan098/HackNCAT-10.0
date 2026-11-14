@@ -24,8 +24,9 @@ venv/
 .idea/
 .vscode/
 
-# Local AI assistant notes (kept off GitHub)
-CLAUDE.md
+# Personal AI assistant notes (kept off GitHub). The shared CLAUDE.md IS committed.
+CLAUDE.local.md
+.claude/settings.local.json
 
 # Test / tool output
 .pytest_cache/

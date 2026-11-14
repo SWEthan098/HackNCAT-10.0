@@ -1,4 +1,10 @@
-# HackNCAT 10.0
+# HackNCAT 10.0: Kairos (Cisco track)
+
+> **Team, start here: [docs/KAIROS.md](docs/KAIROS.md)** has who owns which folder, the API
+> contract, the no-merge-conflict rules and the git routine. Kairos watches a fictional company
+> ("Cisco" on `cisco.example`), connects attacks into incidents, stops dangerous AI actions, and
+> keeps humans in charge. *Fictional demo environment. Not affiliated with or endorsed by Cisco.*
+
 
 A competition-ready starter for HackNCAT 10.0. Accounts, a secure API, a working AI layer (Groq), a
 design system, tests and CI are already wired together, so the team can start on the Lenovo, Cisco or
@@ -82,7 +88,7 @@ Supabase project.
 ```bash
 git clone https://github.com/SWEthan098/HackNCAT-10.0.git
 cd HackNCAT-10.0
-git checkout dev/<your-name>
+git checkout -b p2-ai   # yours: p1-firewall (Ethan), p2-ai (Miles), p3-core (Daylen), p4-web (Jordan)
 ```
 
 **2. API secrets.** The web app's public Supabase values are committed in `web/.env`. Only the API
@@ -110,7 +116,7 @@ After editing `api/.env`, stop and restart uvicorn: `--reload` only watches Pyth
 
 ```bash
 cd web
-npm install
+npm ci          # never `npm install`: it rewrites the lockfile and causes conflicts
 npm run dev
 ```
 
@@ -122,7 +128,7 @@ should say Pass, including the AI provider when the Groq key is set.
 | What | Command | Needs |
 | --- | --- | --- |
 | API lint + format | `cd api && ruff check . && ruff format --check .` | |
-| API tests (31) | `cd api && pytest` | nothing (fake DB, local tokens, mock AI) |
+| API tests (58) | `cd api && pytest` | nothing (fake DB, local tokens, mock AI) |
 | Web lint | `cd web && npm run lint` | |
 | Web types | `cd web && npm run typecheck` | |
 | Web production build | `cd web && npm run build` | |

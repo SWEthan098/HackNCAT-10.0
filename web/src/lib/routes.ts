@@ -11,10 +11,15 @@ export const ROUTES = {
   profile: "/dashboard/profile",
   system: "/dashboard/system",
   ai: "/dashboard/ai",
+  // Kairos
+  console: "/console",
+  attack: "/attack", // PUBLIC: audience Attack Picker (QR code lands here)
+  approve: "/approve",
+  redteam: "/redteam",
 } as const;
 
 /** Paths that require a signed-in user. The proxy redirects to /login otherwise. */
-export const PROTECTED_PREFIXES = [ROUTES.dashboard, ROUTES.resetPassword];
+export const PROTECTED_PREFIXES = [ROUTES.dashboard, ROUTES.resetPassword, ROUTES.console, ROUTES.approve, ROUTES.redteam];
 
 /** Paths a signed-in user is sent away from (to the dashboard). */
 export const GUEST_ONLY = [ROUTES.login, ROUTES.signup, ROUTES.forgotPassword];

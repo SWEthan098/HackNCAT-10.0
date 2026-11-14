@@ -9,6 +9,8 @@ import { ROUTES } from "@/lib/routes";
 import { Wordmark } from "./Wordmark";
 
 export const NAV_ITEMS = [
+  { href: ROUTES.console, label: "Console" },
+  { href: ROUTES.redteam, label: "Red Team" },
   { href: ROUTES.dashboard, label: "Overview" },
   { href: ROUTES.profile, label: "Profile" },
   { href: ROUTES.system, label: "System" },

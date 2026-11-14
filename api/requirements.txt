@@ -6,3 +6,7 @@ supabase>=2.34,<3
 # AI provider SDKs (imported lazily: only the selected provider is loaded)
 groq>=1.7,<2
 anthropic>=2.8,<3
+# Kairos (added up front so nobody edits this file later; ask Daylen for new packages)
+slowapi>=0.1.9,<1
+scikit-learn>=1.6,<2
+pyyaml>=6,<7

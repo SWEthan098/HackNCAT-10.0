@@ -1,0 +1,50 @@
+# Kairos file ownership. Only the owner edits these paths; everyone else asks.
+# Full map + rules: docs/KAIROS.md. GitHub requests a review from the owner on any PR touching
+# their files. Replace each @TODO-handle with the teammate's GitHub username (one small PR, Daylen).
+#   Ethan  = @SWEthan098      Miles = @TODO-miles      Daylen = @TODO-daylen      Jordan = @TODO-jordan
+# Later lines win, so specific paths come after broad ones.
+
+# ---- default: Daylen owns shared repo files ----
+*                                   @TODO-daylen
+
+# ---- Daylen (P3): foundation, database, engine ----
+/api/main.py                        @TODO-daylen
+/api/core/                          @TODO-daylen
+/api/schemas/                       @TODO-daylen
+/api/engine/                        @TODO-daylen
+/api/requirements*.txt              @TODO-daylen
+/api/routers/incidents.py           @TODO-daylen
+/api/routers/approvals.py           @TODO-daylen
+/api/routers/appeals.py             @TODO-daylen
+/api/routers/audit.py               @TODO-daylen
+/api/routers/agents.py              @TODO-daylen
+/api/routers/stats.py               @TODO-daylen
+/api/routers/demo.py                @TODO-daylen
+/api/tests/engine/                  @TODO-daylen
+/supabase/migrations/               @TODO-daylen
+/.github/                           @TODO-daylen
+
+# ---- Ethan (P1): firewall, victim agent, analyst ----
+/api/firewall/                      @SWEthan098
+/api/agents/                        @SWEthan098
+/api/analyst/                       @SWEthan098
+/api/routers/attack.py              @SWEthan098
+/api/routers/analyst.py             @SWEthan098
+/api/tests/firewall/                @SWEthan098
+
+# ---- Miles (P2): detectors, sensors, red team, attack picker ----
+/api/detectors/                     @TODO-miles
+/api/services/ai/                   @TODO-miles
+/api/sensors/                       @TODO-miles
+/api/redteam/                       @TODO-miles
+/api/routers/sensors.py             @TODO-miles
+/api/routers/redteam.py             @TODO-miles
+/api/routers/playground.py          @TODO-miles
+/api/tests/ai/                      @TODO-miles
+/api/tests/benchmarks/              @TODO-miles
+/scripts/attack_chain/              @TODO-miles
+/web/src/app/redteam/               @TODO-miles
+
+# ---- Jordan (P4): the website (everything in web/ except redteam) ----
+/web/                               @TODO-jordan
+/web/src/app/redteam/               @TODO-miles

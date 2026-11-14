@@ -173,3 +173,18 @@ export function mitreUrl(tag: MitreTag): string | null {
 export function chronological(events: KairosEvent[]): KairosEvent[] {
   return [...events].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
 }
+
+// ---------------------------------------------------------------------------------------
+// Analyst citations (should-have: chat drawer). A citation string is either a MITRE
+// technique id or an event id. We link MITRE ids to the official page (built from a
+// validated id, same hosts as mitreUrl) and show event ids as plain labels.
+// ---------------------------------------------------------------------------------------
+
+export type Citation = { raw: string; kind: "attack" | "atlas" | "event"; href: string | null };
+
+export function classifyCitation(raw: string): Citation {
+  const id = raw.trim();
+  if (ATLAS_ID.test(id)) return { raw: id, kind: "atlas", href: `https://atlas.mitre.org/techniques/${id}` };
+  if (ATTACK_ID.test(id)) return { raw: id, kind: "attack", href: `https://attack.mitre.org/techniques/${id.replace(".", "/")}/` };
+  return { raw: id, kind: "event", href: null };
+}

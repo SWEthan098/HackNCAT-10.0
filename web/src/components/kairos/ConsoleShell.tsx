@@ -14,6 +14,7 @@ import { cn } from "@/components/ui";
 import { CONSOLE_SECTIONS, ROUTES, isConsoleSectionActive } from "@/lib/routes";
 import type { OkResponse } from "@/lib/types/kairos";
 import { DISCLAIMER_TEXT } from "./Disclaimer";
+import { AnalystDrawer } from "./AnalystDrawer";
 import { KillSwitch } from "./KillSwitch";
 
 /** The section tabs. `pathname` is null while it is not known yet (no tab is marked current). */
@@ -79,6 +80,9 @@ export function ConsoleFrame({ killSwitch, account, children }: { killSwitch: Re
             <CurrentConsoleTabs />
           </Suspense>
           <div className="ml-auto flex h-12 items-center gap-2 sm:gap-3">
+            <span className="hidden sm:inline-flex">
+              <AnalystDrawer />
+            </span>
             {killSwitch}
             {account}
           </div>

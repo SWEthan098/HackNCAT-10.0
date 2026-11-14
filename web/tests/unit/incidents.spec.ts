@@ -8,6 +8,7 @@ import {
   mitreUrl,
   scoreBreakdown,
   sortIncidents,
+  classifyCitation,
   upsertIncident,
 } from "../../src/lib/incidents";
 import type { Incident, KairosEvent } from "../../src/lib/types/kairos";
@@ -142,4 +143,14 @@ test("chronological sorts oldest first without mutating the input", () => {
   const input = [ev({ id: "b", created_at: "2026-11-14T12:00:02Z" }), ev({ id: "a", created_at: "2026-11-14T12:00:01Z" })];
   expect(chronological(input).map((e) => e.id)).toEqual(["a", "b"]);
   expect(input[0].id).toBe("b");
+});
+
+// ---- analyst citations ----
+
+test("classifyCitation links MITRE ids and leaves event ids as plain labels", () => {
+  expect(classifyCitation("AML.T0051.001")).toEqual({ raw: "AML.T0051.001", kind: "atlas", href: "https://atlas.mitre.org/techniques/AML.T0051.001" });
+  expect(classifyCitation("T1110.004")).toEqual({ raw: "T1110.004", kind: "attack", href: "https://attack.mitre.org/techniques/T1110/004/" });
+  expect(classifyCitation("evt-3").kind).toBe("event");
+  expect(classifyCitation("evt-3").href).toBeNull();
+  expect(classifyCitation(" T1534 ").href).toBe("https://attack.mitre.org/techniques/T1534/");
 });

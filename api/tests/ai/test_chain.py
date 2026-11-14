@@ -131,10 +131,47 @@ def test_everything_stays_inside_the_sandbox():
     assert chain.BOT_ACTOR.startswith("bot:203.0.113.")  # reserved documentation range
 
 
-def test_stage_three_uses_the_scripted_stand_in_until_the_firewall_is_ready():
-    outcome = asyncio.run(firewall_bridge.run_stage3("protected"))
-    assert firewall_bridge.FIREWALL_READY is False and outcome.via == "scripted"
-    assert outcome.blocked and outcome.event.risk == firewall_bridge.BLOCKED_HIJACK_RISK == 55
+def test_stage_three_uses_the_stand_in_offline_and_the_real_firewall_with_a_database(fake_db):
+    offline = asyncio.run(firewall_bridge.run_stage3("protected"))
+    assert offline.via == "scripted" and offline.blocked
+    assert offline.event.risk == firewall_bridge.BLOCKED_HIJACK_RISK == 55
+
+    real = asyncio.run(firewall_bridge.run_stage3("protected", fake_db))
+    assert real.via == "firewall" and real.blocked and not real.leaked
+    assert real.event.risk == 55 and real.event.verdict == "blocked"
+    assert {(e.actor, e.target, e.source) for e in real.events} == {("j.smith", "finance_agent", "scripted")}
+    saved_rows = [r for r in fake_db.tables["events"].rows if r["sensor"] == "agent_firewall"]
+    assert len(saved_rows) == len(real.events)  # the firewall saved its own events
+
+    leak = asyncio.run(firewall_bridge.run_stage3("unprotected", fake_db))
+    assert leak.leaked and not leak.blocked
+
+
+def test_stage_three_finishes_with_the_scripted_agent_when_the_model_is_offline(fake_db, monkeypatch):
+    from agents.victim import runner
+    from agents.victim.planner import AgentOffline
+
+    real_run, calls = runner.run_agent, []
+
+    async def flaky(task, **kw):
+        calls.append("planner" in kw)
+        if "planner" not in kw:
+            raise AgentOffline("timeout")
+        return await real_run(task, **kw)
+
+    monkeypatch.setattr(runner, "run_agent", flaky)
+    outcome = asyncio.run(firewall_bridge.run_stage3("protected", fake_db))
+    assert calls == [False, True] and outcome.blocked
+    assert outcome.via == "firewall (scripted agent: model offline)"
+
+
+def test_attacker_log_names_the_email_that_actually_runs(fake_db):
+    seed_email, real_email = firewall_bridge.planted(), firewall_bridge.planted(fake_db)
+    assert seed_email.id == seed.POISONED_EMAIL_ID and seed_email.exfil_address == seed.EXFIL_ADDRESS
+    assert real_email.id != seed_email.id and real_email.to == "j.smith@cisco.example"
+    assert not real_email.exfil_address.endswith("@cisco.example") and real_email.path.startswith("/shared/finance/")
+    log = "\n".join(run("prompt_injection", db=fake_db).log_lines)
+    assert real_email.id in log and real_email.exfil_address in log and seed.EXFIL_ADDRESS not in log
 
 
 def test_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(monkeypatch, fake_db):
@@ -182,20 +219,34 @@ def test_endpoint_runs_the_chain_for_red_team_and_saves_the_events(client, fake_
     assert r.status_code == 200 and r.json()["outcome"] == "blocked"
     assert "exfiltration attempt: ACCESS DENIED" in r.json()["log_lines"]
     rows = fake_db.tables["events"].rows
-    assert [(e["sensor"], e["actor"], e["target"], e["source"], e["risk"]) for e in rows[:3]] == [
+    assert [(e["sensor"], e["actor"], e["target"], e["source"], e["risk"]) for e in rows[:2]] == [
         ("login_guard", "bot:203.0.113.7", "j.smith", "scripted", 45),
         ("comms_guard", "j.smith", "e.cruz", "scripted", 50),
-        ("agent_firewall", "j.smith", "finance_agent", "scripted", 55),
     ]
     assert rows[0]["raw_features"]["failed_attempts"] == 8 and set(rows[0]["raw_features"]) <= set(FEATURE_KEYS)
+    firewall = [e for e in rows if e["sensor"] == "agent_firewall"]
+    assert max(e["risk"] for e in firewall) == 55 and any(e["verdict"] == "blocked" for e in firewall)
+    assert {(e["actor"], e["target"], e["source"]) for e in firewall} == {("j.smith", "finance_agent", "scripted")}
     recorded = [a for a in fake_db.tables["audit_log"].rows if a["action"] == "event_recorded"]
     assert len(recorded) == len(rows)  # the engine audits every recorded event
-    saved_before = len(rows)
 
-    r = client.post("/redteam/run", json={"stage": "full_chain", "target": "unprotected"}, headers=headers)
-    assert r.json()["outcome"] == "leaked" and len(fake_db.tables["events"].rows) == saved_before  # nothing new
+    # The real engine links all three listeners into ONE Critical incident and recalls the wire request.
+    incidents = fake_db.tables["incidents"].rows
+    assert [(i["risk"], i["level"]) for i in incidents] == [(85, "critical")]
+    assert rows[-1]["action"] == "message_recalled"
+    assert "wire request to e.cruz@cisco.example: RECALLED (no longer in the inbox)" in r.json()["log_lines"]
+
     bad = client.post("/redteam/run", json={"stage": "rm -rf", "target": "cisco.com"}, headers=headers)
     assert bad.status_code == 422
+
+
+def test_unprotected_run_through_the_endpoint_leaks(client, fake_db, token_factory):
+    headers = _as_role(fake_db, token_factory, "red_team")
+    r = client.post("/redteam/run", json={"stage": "full_chain", "target": "unprotected"}, headers=headers)
+    assert r.json()["outcome"] == "leaked"
+    assert any("exfiltration: SUCCESS" in line for line in r.json()["log_lines"])
+    # Login Guard and Comms Guard are out of the path; only the agent's own leak is on record.
+    assert {e["sensor"] for e in fake_db.tables["events"].rows} <= {"agent_firewall"}
 
 
 def test_endpoint_refuses_everyone_without_the_red_team_role(client, fake_db, token_factory):
@@ -216,5 +267,6 @@ def test_a_failed_save_never_changes_the_verdict():
             raise RuntimeError("database down")
 
     result = run(db=_Down())
-    assert result.outcome == "blocked" and [e.risk for e in result.events] == [45, 50, 55]
+    assert result.outcome == "blocked"  # the firewall still blocked; only the record keeping failed
+    assert [e.risk for e in result.events][:2] == [45, 50]
     assert not any(saved(e) for e in result.events)

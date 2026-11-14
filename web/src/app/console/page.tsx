@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { PageHeader } from "@/components/layout/AppShell";
 import { ErrorState, LoadingState } from "@/components/ui";
+import { LiveEventFeed } from "@/components/kairos/LiveEventFeed";
 import { ApiError } from "@/lib/api";
 import type { Incident } from "@/lib/types/kairos";
 
@@ -44,6 +45,9 @@ export default function ConsolePage() {
           ))}
         </ul>
       )}
+      <div className="mt-10">
+        <LiveEventFeed />
+      </div>
     </>
   );
 }

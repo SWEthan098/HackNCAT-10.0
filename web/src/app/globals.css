@@ -15,6 +15,13 @@
   /* The danger key (kill switch, destructive confirms) gets its own bottom edge, like the cobalt key. */
   --color-error-edge: oklch(40% 0.16 27);
   --shadow-key-danger: 0 3px 0 0 var(--color-error-edge), 0 6px 8px -4px oklch(30% 0.12 27 / 0.45), inset 0 1px 0 oklch(100% 0 0 / 0.22);
+  /* Risk level badges (Low uses paper-3/ink-2): wash background + a dark ink of the same hue. */
+  --color-level-medium-wash: oklch(94% 0.085 95);
+  --color-level-medium-ink: oklch(44% 0.1 83);
+  --color-level-high-wash: oklch(93.5% 0.07 62);
+  --color-level-high-ink: oklch(46% 0.145 48);
+  --color-level-critical-wash: oklch(93.5% 0.05 27);
+  --color-level-critical-ink: oklch(46% 0.17 27);
 }
 
 /* Expose the Hallmark tokens as Tailwind utilities (bg-paper, text-ink, border-rule, ...).
@@ -35,6 +42,12 @@
   --color-accent-ink: var(--color-accent-ink);
   --color-focus: var(--color-focus);
   --color-error: var(--color-error);
+  --color-level-medium-wash: var(--color-level-medium-wash);
+  --color-level-medium-ink: var(--color-level-medium-ink);
+  --color-level-high-wash: var(--color-level-high-wash);
+  --color-level-high-ink: var(--color-level-high-ink);
+  --color-level-critical-wash: var(--color-level-critical-wash);
+  --color-level-critical-ink: var(--color-level-critical-ink);
   --color-success: var(--color-success);
   --color-graphite: var(--color-graphite);
   --color-graphite-2: var(--color-graphite-2);

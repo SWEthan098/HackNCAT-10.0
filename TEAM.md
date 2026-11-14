@@ -5,10 +5,13 @@ allowed to touch it: anyone can pick up any issue. Re-balance once the challenge
 
 | Member | GitHub | Role | Owns | Branch |
 | --- | --- | --- | --- | --- |
-| Repo owner | @SWEthan098 | Lead, integration and pitch | `PROJECT_SPEC.md`, merges to `main`, deployment, demo script | `main` (merges), `feature/*` |
-| Miles | `@<github-username>` | Frontend and UX | `web/` pages and `web/src/components/ui`, Hallmark design work, browser E2E tests | `dev/miles` |
-| Daylen | `@<github-username>` | Backend and data | `api/` routers/schemas/services, Supabase migrations and RLS, API tests | `dev/daylen` |
-| JLee | `@<github-username>` | AI and research | `api/services/ai`, prompts and model choice, `challenge/RESEARCH.md` with Agent-Reach | `dev/jlee` |
+| Ethan (P1) | @SWEthan098 | Firewall Lead + AI Analyst + Deploy Owner | `api/firewall`, `api/agents`, `api/analyst`, routers `attack`/`analyst`; Railway + Vercel | `p1-firewall` |
+| Miles (P2) | `@<github-username>` | AI Lead + Red Team + Attack Picker; pitch lead | `api/detectors`, `api/services/ai`, `api/sensors`, `api/redteam`, routers `sensors`/`redteam`/`playground`, `web/src/app/redteam` | `p2-ai` |
+| Daylen (P3) | `@<github-username>` | Core + Data + Deploy Backup | `api/main.py`, `api/core`, `api/schemas`, `api/engine`, other routers, `supabase/migrations`, CI | `p3-core` |
+| Jordan (P4) | `@<github-username>` | Frontend (Defender Console) | all of `web/` except `web/src/app/redteam` | `p4-web` |
+
+**Kairos ownership is exact and enforced by [CODEOWNERS](.github/CODEOWNERS): see [docs/KAIROS.md](docs/KAIROS.md).
+The sections below are from the starter and are superseded where they disagree.**
 
 Fill in the GitHub usernames once everyone has accepted the collaborator invite.
 

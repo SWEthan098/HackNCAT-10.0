@@ -21,9 +21,10 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import engine
-from detectors.login import ACCOUNT_TAKEOVER, explain, login_risk
+from detectors.login import ACCOUNT_TAKEOVER, clean_features, explain, login_risk
 from schemas.kairos import Detection, Event, Level, MitreTag, Source, Verdict
 from schemas.mitre import tag
+from sensors.events import record
 
 logger = logging.getLogger("api.sensors.login_guard")
 
@@ -123,7 +124,8 @@ def handle_login(
 
     event = None
     if record_low or level != "low" or locked:
-        event = engine.record_event(
+        event = record(
+            db,
             sensor="login_guard",
             actor=actor,
             target=username,
@@ -133,5 +135,7 @@ def handle_login(
             verdict=verdict,
             reason=explanation,
             mitre=_mitre(score.technique, risk),
+            # Timing/metadata only (already stripped of unknown keys); the engine deletes it after 24h.
+            raw_features=clean_features(features),
         )
     return LoginResult(verdict, detection, risk, level, response, locked, user_message, event)

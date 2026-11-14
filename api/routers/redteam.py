@@ -1,9 +1,8 @@
-"""Scripted Red Team chain. OWNER: Miles (P2). Bearer auth.
+"""Scripted Red Team chain. OWNER: Miles (P2). Bearer auth + red_team role (auth.require_role).
 
 Runs the 3-stage chain in redteam/chain.py. The target is hardcoded to the fictional
 cisco.example sandbox: the request can only pick a stage and protected / unprotected.
-Every run is written to the server log. TODO(Miles, step 9): red_team role only (ready, lands with
-Daylen's test update) + audit_log entry per run (needs Daylen's helper).
+Every run is written to the server log, and every event it records gets an audit entry from the engine.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Request
 
-from auth import AuthUser, current_user
+from auth import AuthUser, require_role
 from core.db import get_db
 from core.errors import AppError
 from redteam import chain
@@ -33,7 +32,7 @@ def _db(request: Request):
 
 @router.post("/run", response_model=RedteamRunResponse, summary="Run a Red Team stage or the full chain")
 async def redteam_run(
-    body: RedteamRunRequest, user: AuthUser = Depends(current_user), db=Depends(_db)
+    body: RedteamRunRequest, user: AuthUser = Depends(require_role("red_team")), db=Depends(_db)
 ) -> RedteamRunResponse:
     logger.info("redteam run user=%s stage=%s target=%s sandbox=cisco.example", user.id, body.stage, body.target)
     result = await chain.run(body.stage, body.target, db=db)

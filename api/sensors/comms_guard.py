@@ -38,6 +38,7 @@ from detectors.comms import AI_MANIPULATION, CommsScore, add_model_points, messa
 from redteam.seed.company import DOMAIN
 from schemas.kairos import Detection, Event, Level, MitreTag, Source, Verdict
 from schemas.mitre import tag
+from sensors.events import record
 
 logger = logging.getLogger("api.sensors.comms_guard")
 
@@ -159,7 +160,8 @@ async def handle_message(
 
     event = None
     if record_low or level != "low":
-        event = engine.record_event(
+        event = record(
+            db,
             sensor="comms_guard",
             actor=actor or sender_entity,
             target=entity_name(to),
@@ -191,7 +193,7 @@ async def handle_message(
 # ---- recall on escalation ------------------------------------------------------------------
 
 
-def hold_flagged_messages(actors: Iterable[str], *, source: Source) -> list[TrackedMessage]:
+def hold_flagged_messages(actors: Iterable[str], *, source: Source, db: Any = None) -> list[TrackedMessage]:
     """Pull back every flagged, delivered message attributed to these actors (same source only).
 
     Safe to call again: a message that is already on hold is skipped, so nothing is held or
@@ -205,7 +207,8 @@ def hold_flagged_messages(actors: Iterable[str], *, source: Source) -> list[Trac
             continue
         message.held, message.held_at = True, datetime.now(UTC)
         held.append(message)
-        message.recall_event = engine.record_event(
+        message.recall_event = record(
+            db,
             sensor="comms_guard",
             actor=message.actor,
             target=message.recipient,
@@ -223,8 +226,11 @@ def hold_flagged_messages(actors: Iterable[str], *, source: Source) -> list[Trac
     return held
 
 
-def on_incident_escalated(events: Iterable[Event], level: Level) -> list[TrackedMessage]:
-    """Hook for the engine: call when an incident's level changes. Acts only at Critical."""
+def on_incident_escalated(events: Iterable[Event], level: Level, db: Any = None) -> list[TrackedMessage]:
+    """Hook for the engine: call when an incident's level changes. Acts only at Critical.
+
+    Pass the same `db` the engine is using so the recall events are saved alongside the incident.
+    """
     if level != RECALL_AT_LEVEL:
         return []
     events = list(events)
@@ -233,7 +239,7 @@ def on_incident_escalated(events: Iterable[Event], level: Level) -> list[Tracked
     sources = {e.source for e in events}
     held: list[TrackedMessage] = []
     for source in sources:
-        held += hold_flagged_messages({e.actor for e in events if e.source == source}, source=source)
+        held += hold_flagged_messages({e.actor for e in events if e.source == source}, source=source, db=db)
     return held
 
 

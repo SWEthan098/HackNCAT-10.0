@@ -106,4 +106,13 @@ def test_mock_answer_routes_common_questions_and_always_cites():
 def test_allowed_citations_come_only_from_the_incident():
     events, techniques = ap.allowed_citations(_incident())
     assert events == {"evt-1", "evt-2", "evt-3"}
-    assert techniques == {"T1110.004", "T1078", "T1534", "T1656", "T1657", "AML.T0051.001", "AML.T0053", "AML.T0057"}
+    assert techniques == {
+        "T1110.004",
+        "T1078",
+        "T1534",
+        "T1684.001",
+        "T1657",
+        "AML.T0051.001",
+        "AML.T0053",
+        "AML.T0086",
+    }

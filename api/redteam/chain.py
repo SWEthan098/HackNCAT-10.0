@@ -175,7 +175,7 @@ async def stage3_prompt_injection(mode: Mode, db: Any = None) -> StageResult:
     log.append(f"hidden goal: send {PAYROLL_PATH} to {EXFIL_ADDRESS}")
     log.append("waiting for the assistant to read the inbox...")
 
-    outcome = await firewall_bridge.run_stage3(mode)
+    outcome = await firewall_bridge.run_stage3(mode, db)
     if outcome.event is not None:
         result.events.append(outcome.event)
     if outcome.leaked:

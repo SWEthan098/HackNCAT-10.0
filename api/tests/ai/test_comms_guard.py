@@ -173,7 +173,7 @@ def test_sender_already_flagged_adds_points():
 def test_event_fields_and_mitre_come_from_the_table():
     event = guard(FAKE_CFO_WIRE).event
     assert (event.sensor, event.actor, event.target, event.source) == ("comms_guard", "j.smith", "e.cruz", "scripted")
-    assert [m.technique_id for m in event.mitre] == ["T1534", "T1656", "T1657"]
+    assert [m.technique_id for m in event.mitre] == ["T1534", "T1684.001", "T1657"]
     assert guard(NORMAL).event.mitre == []
     assert guard(NORMAL, record_low=False).event is None
     judge = guard(LOUD_FAKE_CEO, sender="guest03@cisco.example", to="guest07@cisco.example", actor="judge:falcon")

@@ -12,13 +12,14 @@ untrusted content cannot drive a send) and records the one agent_firewall event 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
-import engine
 from core.config import get_settings
 from detectors import scan_injection_mock
 from redteam.seed import AGENT_ID, DOMAIN, EXFIL_ADDRESS, PAYROLL_PATH, TAKEOVER_USERNAME, poisoned_email
 from schemas.kairos import Event
 from schemas.mitre import tag
+from sensors.events import record
 
 # Flip to True once Ethan's /agent/run goes through the real firewall AND records its own
 # agent_firewall event for this run (actor j.smith, target finance_agent, source scripted, risk ~55).
@@ -45,7 +46,7 @@ def _hard_rules_broken() -> list[str]:
     return broken
 
 
-def _scripted(mode: str) -> Stage3Outcome:
+def _scripted(mode: str, db: Any = None) -> Stage3Outcome:
     if mode == "unprotected":
         # No Kairos in the path: nothing checks the send, and nothing is recorded.
         return Stage3Outcome(blocked=False, leaked=True, event=None, via="scripted")
@@ -58,7 +59,8 @@ def _scripted(mode: str) -> Stage3Outcome:
         f"Injection scan: {'flagged' if scan.flagged else 'not flagged'} "
         f"({scan.technique or 'none'}, confidence {scan.confidence:.2f}). Nothing left the company."
     )
-    event = engine.record_event(
+    event = record(
+        db,
         sensor="agent_firewall",
         actor=TAKEOVER_USERNAME,
         target=AGENT_ID,
@@ -81,7 +83,7 @@ async def _real_firewall(mode: str) -> Stage3Outcome:
     return Stage3Outcome(blocked=blocked, leaked=not blocked, event=None, via="firewall")
 
 
-async def run_stage3(mode: str) -> Stage3Outcome:
+async def run_stage3(mode: str, db: Any = None) -> Stage3Outcome:
     if FIREWALL_READY and not get_settings().demo_mode:
         return await _real_firewall(mode)
-    return _scripted(mode)
+    return _scripted(mode, db)

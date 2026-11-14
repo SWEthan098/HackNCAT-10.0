@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import engine
+from detectors.login import FEATURE_KEYS
 from redteam import chain, firewall_bridge, seed
 from sensors import comms_guard
+from sensors.events import saved
 
 
 def run(stage="full_chain", mode="protected", db=None):
@@ -78,7 +81,7 @@ def test_events_link_through_the_taken_over_account():
 
 def test_mitre_ids_cover_attack_and_atlas():
     ids = [m.technique_id for e in run().events for m in e.mitre]
-    assert ids == ["T1110.004", "T1078", "T1534", "T1656", "T1657", "AML.T0051.001", "AML.T0053", "AML.T0057"]
+    assert ids == ["T1110.004", "T1078", "T1534", "T1684.001", "T1657", "AML.T0051.001", "AML.T0053", "AML.T0086"]
 
 
 def test_the_chain_is_the_same_every_run():
@@ -134,7 +137,7 @@ def test_stage_three_uses_the_scripted_stand_in_until_the_firewall_is_ready():
     assert outcome.blocked and outcome.event.risk == firewall_bridge.BLOCKED_HIJACK_RISK == 55
 
 
-def test_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(monkeypatch):
+def test_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(monkeypatch, fake_db):
     """Stand-in for Daylen's engine: after each event, if 3 listeners are linked, report Critical."""
     comms_guard.reset_messages()
     real_record, seen = engine.record_event, []
@@ -144,11 +147,12 @@ def test_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(mo
         seen.append(event)
         if len({e.sensor for e in seen}) == 3:
             risk = engine.incident_risk([e.risk for e in seen], 3)
-            comms_guard.on_incident_escalated(list(seen), engine.score_to_level(risk))
+            comms_guard.on_incident_escalated(list(seen), engine.score_to_level(risk), db=kwargs["db"])
         return event
 
     monkeypatch.setattr(engine, "record_event", record_and_correlate)
-    result = run()
+    result = run(db=fake_db)
+    assert [e["action"] for e in fake_db.tables["events"].rows][-1] == "message_recalled"
     assert result.log_lines[-2] == "wire request to e.cruz@cisco.example: RECALLED (no longer in the inbox)"
     assert [e.action for e in result.events][-1] == "message_recalled"
     assert comms_guard.get_message(result.message_id).held
@@ -165,13 +169,50 @@ def test_without_an_escalation_nothing_is_recalled():
     comms_guard.reset_messages()
 
 
-def test_endpoint_runs_the_chain(client, token_factory):
-    headers = {"Authorization": f"Bearer {token_factory()}"}
+def _as_role(fake_db, token_factory, role: str | None) -> dict[str, str]:
+    user_id = str(uuid.uuid4())
+    if role:
+        fake_db.grant_role(user_id, role)
+    return {"Authorization": f"Bearer {token_factory(sub=user_id)}"}
+
+
+def test_endpoint_runs_the_chain_for_red_team_and_saves_the_events(client, fake_db, token_factory):
+    headers = _as_role(fake_db, token_factory, "red_team")
     r = client.post("/redteam/run", json={"stage": "full_chain"}, headers=headers)
     assert r.status_code == 200 and r.json()["outcome"] == "blocked"
     assert "exfiltration attempt: ACCESS DENIED" in r.json()["log_lines"]
+    rows = fake_db.tables["events"].rows
+    assert [(e["sensor"], e["actor"], e["target"], e["source"], e["risk"]) for e in rows] == [
+        ("login_guard", "bot:203.0.113.7", "j.smith", "scripted", 45),
+        ("comms_guard", "j.smith", "e.cruz", "scripted", 50),
+        ("agent_firewall", "j.smith", "finance_agent", "scripted", 55),
+    ]
+    assert rows[0]["raw_features"]["failed_attempts"] == 8 and set(rows[0]["raw_features"]) <= set(FEATURE_KEYS)
+    assert len(fake_db.tables["audit_log"].rows) == 3  # the engine audits every recorded event
+
     r = client.post("/redteam/run", json={"stage": "full_chain", "target": "unprotected"}, headers=headers)
-    assert r.json()["outcome"] == "leaked"
-    assert client.post("/redteam/run", json={"stage": "full_chain"}).status_code == 401
+    assert r.json()["outcome"] == "leaked" and len(fake_db.tables["events"].rows) == 3  # nothing new recorded
     bad = client.post("/redteam/run", json={"stage": "rm -rf", "target": "cisco.com"}, headers=headers)
     assert bad.status_code == 422
+
+
+def test_endpoint_refuses_everyone_without_the_red_team_role(client, fake_db, token_factory):
+    body = {"stage": "full_chain"}
+    assert client.post("/redteam/run", json=body).status_code == 401
+    for role in (None, "approver", "analyst"):
+        r = client.post("/redteam/run", json=body, headers=_as_role(fake_db, token_factory, role))
+        assert r.status_code == 403, role
+    assert fake_db.tables["events"].rows == []
+
+
+def test_a_failed_save_never_changes_the_verdict():
+    class _Down:
+        def table(self, _name):
+            raise RuntimeError("database down")
+
+        def rpc(self, *_a, **_k):
+            raise RuntimeError("database down")
+
+    result = run(db=_Down())
+    assert result.outcome == "blocked" and [e.risk for e in result.events] == [45, 50, 55]
+    assert not any(saved(e) for e in result.events)

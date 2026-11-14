@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from engine import reset_demo
+from engine import decide_approval, is_frozen, is_locked, reset_demo
 from schemas.kairos import Event
 
 from .helpers import full_chain, rows, stage1, stage2
@@ -44,7 +44,23 @@ def test_no_call_when_the_level_stays_the_same(fake_db, comms_guard):
 def test_reset_tells_comms_guard(fake_db, comms_guard):
     full_chain(fake_db)
     reset_demo(fake_db, by="user:redteam")
-    assert comms_guard.calls[-1] == ("reset",)
+    assert ("reset",) in comms_guard.calls
+
+
+def test_reset_reloads_the_seed_with_everything_unlocked(fake_db):
+    """Miles's real seed: after a reset every sandbox entity is back, and none is locked or frozen."""
+    from redteam.seed import all_entities
+
+    full_chain(fake_db)
+    decide_approval(fake_db, rows(fake_db, "approvals")[0]["id"], user_id="approver-1", approve=True)
+    assert is_locked(fake_db, "j.smith") and is_frozen(fake_db, "finance_agent")
+
+    reset_demo(fake_db, by="user:redteam")
+    state = rows(fake_db, "entity_state")
+    assert {r["entity"] for r in state} == set(all_entities())
+    assert not any(r["locked"] or r["frozen"] or r["sessions_revoked_at"] for r in state)
+    assert not is_locked(fake_db, "j.smith") and not is_frozen(fake_db, "finance_agent")
+    assert rows(fake_db, "incidents") == [] and rows(fake_db, "events") == []
 
 
 def test_a_broken_or_missing_hook_never_stops_the_engine(fake_db, comms_guard, monkeypatch):

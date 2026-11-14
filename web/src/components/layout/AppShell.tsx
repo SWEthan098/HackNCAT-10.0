@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { cn } from "@/components/ui";
-import { ROUTES } from "@/lib/routes";
+import { ROUTES, canOpen, homeFor } from "@/lib/routes";
 import { AccountMenu } from "./AccountMenu";
 import { Wordmark } from "./Wordmark";
 
@@ -24,6 +25,9 @@ function isActive(pathname: string, href: string) {
 /** Top bar shell for signed-in screens. Links wrap into a second row under 40rem. */
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { roles } = useAuth();
+  // Links appear once roles are known, so a red_team account never flashes console links.
+  const links = roles === null ? [] : NAV_ITEMS.filter((item) => canOpen(item.href, roles));
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -32,9 +36,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <header className="sticky top-0 z-[300] border-b border-rule bg-paper/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-2 sm:px-6">
-          <Wordmark href={ROUTES.dashboard} />
+          <Wordmark href={homeFor(roles ?? [])} />
           <nav aria-label="Main" className="order-3 -mx-2 flex w-full gap-1 overflow-x-auto sm:order-none sm:w-auto">
-            {NAV_ITEMS.map((item) => {
+            {links.map((item) => {
               const active = isActive(pathname, item.href);
               return (
                 <Link

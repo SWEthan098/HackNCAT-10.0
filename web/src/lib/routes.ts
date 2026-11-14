@@ -57,3 +57,37 @@ export function safeNextPath(next: string | null | undefined, fallback: string =
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return fallback;
   return next;
 }
+
+// ---------------------------------------------------------------------------------------
+// Role split (requested by Miles): red_team accounts only get /redteam; everyone else gets
+// /console, /approve and the rest, but not /redteam. Roles come from public.user_roles (each
+// user can read only their own rows). This is a navigation layer: the data itself is still
+// protected by RLS and by the API's own role checks.
+// ---------------------------------------------------------------------------------------
+
+export type Role = "approver" | "red_team" | "analyst";
+
+/** Protected pages a red_team account may still open. */
+const RED_TEAM_ALLOWED = [ROUTES.redteam, ROUTES.resetPassword];
+
+const isUnder = (pathname: string, prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
+
+/** Where "home" is for this account: after login, and from guest-only pages. */
+export function homeFor(roles: readonly string[]): string {
+  return roles.includes("red_team") ? ROUTES.redteam : ROUTES.dashboard;
+}
+
+/** The page to send this account to instead, or null if it may open `pathname`. */
+export function roleRedirect(pathname: string, roles: readonly string[]): string | null {
+  if (roles.includes("red_team")) {
+    if (isProtected(pathname) && !RED_TEAM_ALLOWED.some((p) => isUnder(pathname, p))) return ROUTES.redteam;
+    return null;
+  }
+  if (isUnder(pathname, ROUTES.redteam)) return ROUTES.console;
+  return null;
+}
+
+/** Same split for nav links: a link shows only if the page would open. */
+export function canOpen(href: string, roles: readonly string[]): boolean {
+  return roleRedirect(href, roles) === null;
+}

@@ -149,15 +149,18 @@ class _Query:
             return _Result([dict(r) for r in new])
         if self.op == "upsert":
             key = self.opts.get("on_conflict") or table.pk
-            existing = next((r for r in rows if r.get(key) == self.payload.get(key)), None)
-            if existing and self.opts.get("ignore_duplicates"):
-                return _Result([])
-            if existing:
-                existing.update(self.payload)
-                return _Result([dict(existing)])
-            row = table.new_row(self.payload)
-            rows.append(row)
-            return _Result([dict(row)])
+            out = []
+            for payload in self.payload if isinstance(self.payload, list) else [self.payload]:
+                existing = next((r for r in rows if r.get(key) == payload.get(key)), None)
+                if existing and self.opts.get("ignore_duplicates"):
+                    continue
+                if existing:
+                    existing.update(payload)
+                else:
+                    existing = table.new_row(payload)
+                    rows.append(existing)
+                out.append(dict(existing))
+            return _Result(out)
         if self.op == "update":
             hit = [r for r in rows if self._match(r)]
             for r in hit:

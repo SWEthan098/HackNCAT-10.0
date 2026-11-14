@@ -18,13 +18,13 @@ logger = logging.getLogger("api.engine")
 _tasks: set[asyncio.Task] = set()  # keeps scheduled async hooks alive until they finish
 
 
-def _call(module: str, name: str, *args) -> bool:
-    """Call module.name(*args) if it exists. True if it ran (or was scheduled) without error."""
+def _call(module: str, name: str, *args, **kwargs) -> bool:
+    """Call module.name(*args, **kwargs) if it exists. True if it ran (or was scheduled) without error."""
     try:
         func = getattr(importlib.import_module(module), name, None)
         if func is None:
             return False
-        result = func(*args)
+        result = func(*args, **kwargs)
         if inspect.isawaitable(result):
             try:
                 task = asyncio.get_running_loop().create_task(result)
@@ -45,5 +45,10 @@ def incident_escalated(events: list[dict], level: str) -> bool:
     return _call("sensors.comms_guard", "on_incident_escalated", [Event(**e) for e in events], level)
 
 
-def demo_reset() -> bool:
-    return _call("sensors.comms_guard", "reset_messages")
+def demo_reset(db) -> dict[str, bool]:
+    """After the tables are cleared: Comms Guard forgets its held messages, then Miles's seed puts
+    every sandbox account and agent back to its clean, unlocked baseline."""
+    return {
+        "comms_guard": _call("sensors.comms_guard", "reset_messages"),
+        "seed": _call("redteam.seed", "seed_database", db, reset=True),
+    }

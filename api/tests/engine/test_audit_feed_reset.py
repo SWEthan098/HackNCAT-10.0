@@ -101,8 +101,10 @@ def test_reset_returns_a_clean_stage(fake_db):
 
     counts = reset_demo(fake_db, by="user:redteam")
     assert counts["events"] == 6 and counts["incidents"] == 2 and counts["entity_state"] == 2
-    for table in ("events", "incidents", "approvals", "appeals", "attempts", "public_feed", "entity_state"):
+    for table in ("events", "incidents", "approvals", "appeals", "attempts", "public_feed"):
         assert rows(fake_db, table) == [], table
+    # entity_state is cleared, then the seed puts every sandbox entity back unlocked and unfrozen.
+    assert not any(r["locked"] or r["frozen"] for r in rows(fake_db, "entity_state"))
     assert len(rows(fake_db, "user_roles")) == 1  # accounts and roles survive
     assert len(rows(fake_db, "audit_log")) == audit_before + 1  # the log is kept and records the reset
     assert rows(fake_db, "audit_log")[-1]["action"] == "demo_reset" and verify_audit(fake_db).ok

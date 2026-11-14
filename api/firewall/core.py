@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agents.victim.tools import ToolResult
-from firewall import dlp, scoring
+from firewall import detection, dlp, scoring
+from firewall.detection import DetectorOutcome
 from firewall.integrations import EntityStateReader, record
 from firewall.policy import AgentPolicy, PolicyError, get_policy
 from firewall.scope import Scope, derive_scope
@@ -48,6 +49,8 @@ class TaskContext:
     untrusted_seen: bool = False
     taint: TaintTracker = field(default_factory=TaintTracker)
     canary_hits: int = 0
+    injection: list[DetectorOutcome] = field(default_factory=list)  # flagged scans of untrusted content
+    scanner_failed: bool = False
     max_risk: int = 0
     policy_error: str | None = None
 
@@ -108,7 +111,7 @@ class Firewall:
     ) -> Decision:
         ctx = self.ctx
         ctx.max_risk = max(ctx.max_risk, risk)
-        if verdict != "allowed" and layer and layer not in ctx.blocked_layers:
+        if verdict == "blocked" and layer and layer not in ctx.blocked_layers:
             ctx.blocked_layers.append(layer)
         event = record(
             actor=ctx.actor,
@@ -170,6 +173,13 @@ class Firewall:
             blocked = self._check_send(args)
             if blocked is not None:
                 return blocked
+        if policy.is_sensitive(tool) and ctx.scanner_failed:
+            return self._block(
+                tool,
+                "injection_scan",
+                "The injection scanner could not check what the agent read, so sensitive actions are blocked.",
+                risk=scoring.SCANNER_FAILURE,
+            )
         return self._allow(tool)
 
     def _check_send(self, args: dict[str, Any]) -> Decision | None:
@@ -236,9 +246,40 @@ class Firewall:
             return result.content
         self.ctx.untrusted_seen = True
         self.ctx.taint.add(result.origin, result.content, result.labels)
+        await self._scan_untrusted(result.content, result.origin, indirect=True)
         # The model never needs SSNs, keys or card numbers: strip them before it sees the data.
         content = dlp.redact(result.content, dlp.INTERNAL).text
         return f"<<UNTRUSTED {result.origin}>>\n{content}\n<<END UNTRUSTED>>"
+
+    async def _scan_untrusted(self, text: str, origin: str, *, indirect: bool) -> DetectorOutcome:
+        ctx = self.ctx
+        outcome = await detection.scan(text, enabled=ctx.detectors_enabled)
+        if not outcome.flagged:
+            return outcome
+        ctx.injection.append(outcome)
+        ctx.scanner_failed = ctx.scanner_failed or outcome.failed
+        d = outcome.detection
+        keys = ["prompt_injection_indirect" if indirect else "prompt_injection_direct"]
+        if detection.is_obfuscation(d):
+            keys.append("prompt_obfuscation")
+        if detection.is_jailbreak(d):
+            keys.append("llm_jailbreak")
+        risk = scoring.SCANNER_FAILURE if outcome.failed else scoring.injection_points(d.confidence)
+        what = "could not be scanned" if outcome.failed else "contains instructions aimed at the AI"
+        self._decide(
+            "scan",
+            "flagged",
+            "injection_scan",
+            f"Content from {origin} {what}: {d.explanation}",
+            risk,
+            action="injection_detected" if not outcome.failed else "injection_scan_failed",
+            mitre=[tag(k) for k in keys],
+        )
+        return outcome
+
+    async def screen_request(self, text: str) -> DetectorOutcome:
+        """Scan a request typed by an untrusted requester (e.g. /attack direct delivery)."""
+        return await self._scan_untrusted(text, "the request", indirect=False)
 
     async def filter_output(self, text: str) -> str:
         if canary_hit(text):

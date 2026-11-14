@@ -22,7 +22,11 @@ logger = logging.getLogger("api.firewall")
 
 SENSOR = "agent_firewall"
 # Rows Daylen's kill switch may use to freeze every agent at once.
-GLOBAL_FREEZE_ENTITIES = ("*", "all_agents", "killswitch")
+try:  # Daylen's kill switch row; fall back to the literal if the engine module moves
+    from engine.containment import ALL_AGENTS as _KILL_SWITCH_ROW
+except ImportError:  # pragma: no cover
+    _KILL_SWITCH_ROW = "*all-agents*"
+GLOBAL_FREEZE_ENTITIES = (_KILL_SWITCH_ROW, "*", "all_agents", "killswitch")
 
 
 def record(
@@ -147,16 +151,17 @@ class StaticEntityState(EntityStateReader):
         return EntityState(entity, entity in self.locked, entity in self.frozen)
 
 
-def request_approval(event: Event | None, summary: str) -> str | None:
+def request_approval(db: Any | None, event: Event | None, *, requested_by: str = "agent_firewall") -> str | None:
     """Ask Daylen's engine for a pending approval on the event's incident. Returns the approval id.
 
-    `summary` must be built from code templates (never attacker text) so the approver can't be fooled.
+    The engine writes the approval text from code templates (never attacker text), and returns the
+    already-pending approval if one exists, so calling this twice is safe.
     """
     create = getattr(engine, "create_approval", None)
-    if not callable(create) or event is None or not event.incident_id:
+    if not callable(create) or db is None or event is None or not event.incident_id:
         return None
     try:
-        approval = create(incident_id=event.incident_id, summary=summary)
+        approval = create(db, event.incident_id, requested_by=requested_by)
     except Exception as e:
         logger.error("firewall: create_approval failed (%s)", type(e).__name__)
         return None

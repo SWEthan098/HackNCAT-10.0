@@ -40,13 +40,18 @@ def test_unknown_state_holds_sends_but_allows_reads(run):
     assert out.firewall.ctx.held_layers == ["containment"]
 
 
-def test_flagged_injection_holds_a_sensitive_action_for_approval(run, monkeypatch, events):
+def test_flagged_injection_holds_a_sensitive_action_for_approval(run, monkeypatch, events, fake_db):
     async def flag_files(text):
         return Detection(flagged="budget" in text.lower(), confidence=0.9, technique="override", explanation="x")
 
     monkeypatch.setattr(detectors, "scan_injection", flag_files)
     approvals = []
-    monkeypatch.setattr(engine, "create_approval", lambda **kw: approvals.append(kw) or {"id": "ap-1"}, raising=False)
+
+    def fake_create(db, incident_id, *, requested_by="system"):
+        approvals.append({"db": db, "incident_id": incident_id, "requested_by": requested_by})
+        return {"id": "ap-1"}
+
+    monkeypatch.setattr(engine, "create_approval", fake_create)
     real = engine.record_event
 
     def with_incident(**kw):
@@ -54,14 +59,14 @@ def test_flagged_injection_holds_a_sensitive_action_for_approval(run, monkeypatc
         return ev.model_copy(update={"incident_id": "inc-1"})
 
     monkeypatch.setattr(engine, "record_event", with_incident)
-    out = run(SEND)
+    out = run(SEND, db=fake_db)  # approvals need a database
     send = _sends(out)[0]
     assert send.verdict == "flagged" and send.layer == "injection_scan"
     assert "Held for human approval" in send.reason
     assert out.run.sent == []
     assert out.firewall.ctx.approvals == ["ap-1"]
     assert approvals[0]["incident_id"] == "inc-1"
-    assert "m.reyes" not in approvals[0]["summary"]  # template text only, no attacker-controlled values
+    assert approvals[0]["requested_by"] == "firewall:finance_agent"  # the engine writes the text from templates
 
 
 def test_failed_intent_check_holds(run, monkeypatch):
@@ -130,3 +135,27 @@ def test_db_reader_reads_rows(frozen):
             return Q()
 
     assert EntityStateReader(DB()).agent_frozen("finance_agent") is frozen
+
+
+def test_daylens_kill_switch_row_freezes_the_agent(run):
+    from engine.containment import ALL_AGENTS
+
+    out = run(SEND, state=StaticEntityState(frozen={ALL_AGENTS}))
+    assert out.run.executed == [] and "frozen" in out.firewall.ctx.decisions[0].reason
+
+
+def test_kill_switch_end_to_end_with_the_engine(fake_db):
+    """Daylen's kill_switch() writes the row; my firewall reads it and refuses to act."""
+    from engine.containment import kill_switch
+
+    kill_switch(fake_db, by="test")
+    fw = Firewall.for_task(
+        agent="finance_agent",
+        user_request=SEND,
+        actor="j.smith",
+        target="finance_agent",
+        source="scripted",
+        state=EntityStateReader(fake_db),
+    )
+    d = asyncio.run(fw.before_tool("read_file", {"path": "/shared/finance/q3_budget.txt"}))
+    assert d.verdict == "blocked" and d.layer == "containment"

@@ -18,8 +18,16 @@ owner for. Do not make the change.
 | **Daylen** (P3) | Core + Data + **Deploy Backup** | `p3-core` | `api/main.py`, `api/core/`, `api/schemas/`, `api/engine/`, `api/requirements*.txt`, routers `incidents`, `approvals`, `appeals`, `audit`, `agents`, `stats`, `demo`, `health`, `me`, `ai`, `api/tests/engine/`, `api/tests/test_*.py`, `supabase/migrations/` (ONLY Daylen), `.github/`, root files (`README.md`, `CLAUDE.md`, `.gitignore`, `.gitattributes`) |
 | **Jordan** (P4) | Frontend (Defender Console) | `p4-web` | everything in `web/` EXCEPT `web/src/app/redteam/`: `package.json` + lockfile, `src/proxy.ts`, `src/lib/` (incl. `types/kairos.ts`), `src/components/`, `src/app/console/`, `src/app/attack/`, `src/app/approve/`, `src/app/login/`, all other pages |
 
-Detailed map, contract and rules: **[docs/KAIROS.md](docs/KAIROS.md)**. Per-person task lists with
-tests for each step: the team's Notion page ("BUILD CHECKLIST" on each person's page).
+## Step 2: read the full plan before doing anything
+
+Once you know who you're working with, **read these in full before starting work**:
+1. **[docs/PLAN.md](docs/PLAN.md)**: the complete plan (every detail: architecture, firewall,
+   scoring, correlation, screens, Attack Picker, MITRE, safeguards, demo, deployment). It is the
+   source of truth; it wins over the Notion page and over anything older.
+2. **`docs/team/<name>.md`** (ethan, miles, daylen or jordan): that person's mission, folders,
+   endpoints, dependencies and ordered build checklist with a test for each step. Work through it
+   one step at a time: after each step show how to test it and wait for their OK.
+3. **[docs/KAIROS.md](docs/KAIROS.md)**: file ownership map, contract and git routine.
 
 ## What Kairos is (plain English)
 

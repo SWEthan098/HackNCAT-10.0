@@ -14,7 +14,8 @@ import { ApiError, apiFetch } from "@/lib/api";
 import type { AttackResponse } from "@/lib/types/kairos";
 
 export default function AttackPage() {
-  const [nickname] = useState(() => `agent-${Math.random().toString(36).slice(2, 7)}`);
+  // Codename is created on first launch (not during render): Next.js prerenders this page.
+  const [nickname, setNickname] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<AttackResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,8 +24,10 @@ export default function AttackPage() {
   async function launch() {
     setBusy(true);
     setError(null);
+    const codename = nickname ?? `agent-${crypto.randomUUID().slice(0, 5)}`;
+    setNickname(codename);
     try {
-      setResult(await apiFetch<AttackResponse>("/attack", { method: "POST", body: { message, nickname } }));
+      setResult(await apiFetch<AttackResponse>("/attack", { method: "POST", body: { message, nickname: codename } }));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -37,7 +40,9 @@ export default function AttackPage() {
       <Wordmark />
       <h1 className="mt-6 text-2xl">Join the Kairos Red Team</h1>
       <p className="mt-2 text-ink-2">Make the finance AI leak the vault code, or email payroll outside cisco.example.</p>
-      <p className="mt-1 text-sm text-muted">You are {nickname}.</p>
+      <p className="mt-1 text-sm text-muted">
+        {nickname ? `You are ${nickname}.` : "You get a codename when you launch your first attack."}
+      </p>
       <div className="mt-6 flex flex-col gap-3">
         <Field label="Your attack" value={message} onChange={(e) => setMessage(e.target.value)} maxLength={500} />
         <Button onClick={launch} loading={busy} disabled={!message.trim()}>

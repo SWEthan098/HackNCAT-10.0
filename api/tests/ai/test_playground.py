@@ -250,3 +250,25 @@ def test_a_broken_counter_never_changes_the_result(fake_db, monkeypatch):
     result = run("fake_boss", {"pressure": "threatening"}, db=fake_db)
     assert result.response_level == "blocked" and fake_db.tables["public_feed"].rows == []
     assert run("password_guessing", {"sneaky": True}).response_level == "watched"  # no database: nothing published
+
+
+def test_a_room_on_one_wifi_is_not_throttled_as_one_device(client):
+    """Everyone at the venue shares one public address; each judge still gets their own allowance."""
+    headers = {"x-forwarded-for": "198.51.100.7"}
+    codes = [
+        client.post(
+            "/playground/launch",
+            json={"attack_type": "fake_boss", "nickname": f"Agent Judge {n}"},
+            headers=headers,
+        ).status_code
+        for n in range(30)
+    ]
+    assert codes == [200] * 30
+    # One judge hammering the button is still limited, without affecting the others.
+    body = {"attack_type": "fake_boss", "nickname": "Agent Judge 0"}
+    again = [client.post("/playground/launch", json=body, headers=headers).status_code for _ in range(7)]
+    assert again.count(429) >= 1
+    other = client.post(
+        "/playground/launch", json={"attack_type": "fake_boss", "nickname": "Agent Judge 1"}, headers=headers
+    )
+    assert other.status_code == 200

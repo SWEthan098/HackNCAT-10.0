@@ -12,11 +12,15 @@ import type { Approval, ApprovalStatus } from "@/lib/types/kairos";
 /** The fields expiry decisions need (ApprovalRow satisfies this). */
 export type ApprovalLike = { status: ApprovalStatus; expires_at?: string | null };
 
-/** An approvals table row. expires_at is extra (structural: the frozen Approval type stays untouched). */
-export type ApprovalRow = Approval & { expires_at?: string | null };
+/**
+ * An approvals table row. expires_at and kind are extra (structural: the frozen Approval type
+ * stays untouched). kind is 'containment' | 'false_positive' | 'release' in the database; it is
+ * kept as a plain string here so an unknown future kind degrades to the default treatment.
+ */
+export type ApprovalRow = Approval & { expires_at?: string | null; kind?: string | null };
 
 /** Columns the phone and the console badge select from public.approvals. */
-export const APPROVAL_COLUMNS = "id, created_at, incident_id, status, summary, decided_by, decided_at, expires_at";
+export const APPROVAL_COLUMNS = "id, created_at, incident_id, status, summary, decided_by, decided_at, expires_at, kind";
 
 /** Shape check for rows arriving from a select or over Realtime. */
 export function asApprovalRow(row: unknown): ApprovalRow | null {
@@ -34,7 +38,18 @@ export function asApprovalRow(row: unknown): ApprovalRow | null {
     decided_by: typeof r.decided_by === "string" ? r.decided_by : null,
     decided_at: typeof r.decided_at === "string" ? r.decided_at : null,
     expires_at: typeof r.expires_at === "string" ? r.expires_at : null,
+    kind: typeof r.kind === "string" ? r.kind : null,
   };
+}
+
+/**
+ * Whether a pending request raises the loud alarm + red screen. Lifting containment
+ * (kind 'release') is the calm direction — nothing gets locked if it waits — so it sits in
+ * the list without ringing. Everything else (containment, false positive, unknown kinds)
+ * keeps the alarm: when in doubt, ring.
+ */
+export function ringsAlarm(a: Pick<ApprovalRow, "kind">): boolean {
+  return a.kind !== "release";
 }
 
 /** Insert or replace by id (Realtime INSERT/UPDATE both land here), newest first. */

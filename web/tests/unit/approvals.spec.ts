@@ -5,6 +5,7 @@ import {
   isPastDeadline,
   nextDeadline,
   pendingApprovals,
+  ringsAlarm,
   shownStatus,
   upsertApproval,
   type ApprovalRow,
@@ -104,6 +105,7 @@ test("asApprovalRow accepts a well-shaped row and rejects garbage", () => {
     decided_by: null,
     decided_at: null,
     expires_at: "2026-11-14T12:05:00Z",
+    kind: "containment",
   });
   expect(parsed).toEqual({
     id: "ap-9",
@@ -114,12 +116,23 @@ test("asApprovalRow accepts a well-shaped row and rejects garbage", () => {
     decided_by: null,
     decided_at: null,
     expires_at: "2026-11-14T12:05:00Z",
+    kind: "containment",
   });
-  // A row without expires_at still parses (the column is structural, not contractual).
+  // A row without expires_at or kind still parses (both columns are structural, not contractual).
   expect(asApprovalRow({ id: "x", created_at: "2026-11-14T11:00:00Z", status: "pending", summary: "s" })?.expires_at).toBeNull();
+  expect(asApprovalRow({ id: "x", created_at: "2026-11-14T11:00:00Z", status: "pending", summary: "s" })?.kind).toBeNull();
   expect(asApprovalRow(null)).toBeNull();
   expect(asApprovalRow("nope")).toBeNull();
   expect(asApprovalRow({ id: 7, status: "pending", summary: "s", created_at: "t" })).toBeNull();
+});
+
+test("only release requests skip the alarm; unknown kinds ring", () => {
+  expect(ringsAlarm({ kind: "release" })).toBe(false);
+  expect(ringsAlarm({ kind: "containment" })).toBe(true);
+  expect(ringsAlarm({ kind: "false_positive" })).toBe(true);
+  expect(ringsAlarm({ kind: null })).toBe(true); // rows from before the kind column
+  expect(ringsAlarm({})).toBe(true);
+  expect(ringsAlarm({ kind: "something_new" })).toBe(true); // when in doubt, ring
 });
 
 test("upsertApproval replaces by id and keeps newest first", () => {

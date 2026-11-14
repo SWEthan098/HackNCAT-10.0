@@ -18,6 +18,7 @@ import {
   asApprovalRow,
   canDecide,
   nextDeadline,
+  ringsAlarm,
   shownStatus,
   upsertApproval,
   type ApprovalRow,
@@ -87,10 +88,11 @@ export function ApprovalPhoneView({
   }, [approvals, now]);
 
   // Rows past their deadline are not pending here: they never ring and get no buttons.
-  // ANY undecided pending request raises the red screen - including one already waiting
+  // ANY undecided pending LOCK request raises the red screen - including one already waiting
   // when the page loaded: before the alarm is armed it shows "Tap to sound the alarm".
+  // Unlock requests (kind 'release') never ring: they wait calmly in the list below.
   const pending = (approvals ?? []).filter((a) => canDecide(a, now));
-  const ringing = approvals === null ? null : (pending.find((a) => !acknowledged.has(a.id)) ?? null);
+  const ringing = approvals === null ? null : (pending.find((a) => !acknowledged.has(a.id) && ringsAlarm(a)) ?? null);
   const overlayOpen = testing || ringing !== null;
 
   const alarm = () => (alarmRef.current ??= createAlarm());
@@ -248,7 +250,7 @@ export function ApprovalPhoneView({
         </section>
       )}
 
-      <section aria-label="Containment requests" className="flex flex-col gap-3">
+      <section aria-label="Approval requests" className="flex flex-col gap-3">
         {!approvals ? (
           <LoadingState label="Loading requests" lines={3} />
         ) : approvals.length === 0 ? (
@@ -257,17 +259,36 @@ export function ApprovalPhoneView({
           approvals.map((a) => {
             // What the row *shows*: a pending row past its deadline reads as expired.
             const status = shownStatus(a, now);
+            // Unlock requests look deliberately different from lock requests: accent blue
+            // instead of alarm red, "Request to UNLOCK" heading, and they never rang above.
+            const unlock = !ringsAlarm(a);
             return (
               <article
                 key={a.id}
                 className={cn(
                   "rounded-card border p-4",
-                  status === "pending" ? "border-error/60 border-l-4 border-l-level-critical bg-paper-2" : "border-rule bg-paper",
+                  status !== "pending"
+                    ? "border-rule bg-paper"
+                    : unlock
+                      ? "border-accent/60 border-l-4 border-l-accent bg-paper-2"
+                      : "border-error/60 border-l-4 border-l-level-critical bg-paper-2",
                 )}
               >
                 <p className="mb-2 flex items-center justify-between gap-2 text-sm">
-                  <span className={status === "pending" ? "font-semibold text-level-critical-ink" : "font-medium text-ink-2"}>
-                    {status === "pending" ? "Waiting for you" : status === "approved" ? "Approved" : status === "denied" ? "Denied" : "Expired"}
+                  <span
+                    className={
+                      status !== "pending" ? "font-medium text-ink-2" : unlock ? "font-semibold text-accent" : "font-semibold text-level-critical-ink"
+                    }
+                  >
+                    {status === "pending"
+                      ? unlock
+                        ? "Request to UNLOCK · waiting for you"
+                        : "Waiting for you"
+                      : status === "approved"
+                        ? "Approved"
+                        : status === "denied"
+                          ? "Denied"
+                          : "Expired"}
                   </span>
                   <span className="num font-mono text-[0.8125rem] text-muted">{clock(a.decided_at ?? a.created_at)}</span>
                 </p>

@@ -7,10 +7,6 @@ export const ROUTES = {
   forgotPassword: "/forgot-password",
   resetPassword: "/reset-password",
   authCallback: "/auth/callback",
-  dashboard: "/dashboard",
-  profile: "/dashboard/profile",
-  system: "/dashboard/system",
-  ai: "/dashboard/ai",
   // Kairos
   console: "/console",
   consoleAudience: "/console/audience", // projector view of audience attacks
@@ -36,9 +32,9 @@ export function isConsoleSectionActive(pathname: string, href: string): boolean 
 }
 
 /** Paths that require a signed-in user. The proxy redirects to /login otherwise. */
-export const PROTECTED_PREFIXES = [ROUTES.dashboard, ROUTES.resetPassword, ROUTES.console, ROUTES.approve, ROUTES.redteam];
+export const PROTECTED_PREFIXES = [ROUTES.resetPassword, ROUTES.console, ROUTES.approve, ROUTES.redteam];
 
-/** Paths a signed-in user is sent away from (to the dashboard). */
+/** Paths a signed-in user is sent away from (to their home). */
 export const GUEST_ONLY = [ROUTES.login, ROUTES.signup, ROUTES.forgotPassword];
 
 export function isProtected(pathname: string): boolean {
@@ -53,7 +49,7 @@ export function isGuestOnly(pathname: string): boolean {
  * Only allow same-origin relative paths as post-login destinations, to prevent open
  * redirects like ?next=https://evil.example or ?next=//evil.example.
  */
-export function safeNextPath(next: string | null | undefined, fallback: string = ROUTES.dashboard): string {
+export function safeNextPath(next: string | null | undefined, fallback: string = ROUTES.console): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return fallback;
   return next;
 }
@@ -74,7 +70,9 @@ const isUnder = (pathname: string, prefix: string) => pathname === prefix || pat
 
 /** Where "home" is for this account: after login, and from guest-only pages. */
 export function homeFor(roles: readonly string[]): string {
-  return roles.includes("red_team") ? ROUTES.redteam : ROUTES.dashboard;
+  if (roles.includes("red_team")) return ROUTES.redteam;
+  if (roles.includes("approver")) return ROUTES.approve;
+  return ROUTES.console;
 }
 
 /** The page to send this account to instead, or null if it may open `pathname`. */

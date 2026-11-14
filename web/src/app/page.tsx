@@ -19,8 +19,8 @@ export default function Home() {
           <ButtonLink href={ROUTES.signup} size="lg">
             Create an account
           </ButtonLink>
-          <ButtonLink href={ROUTES.dashboard} variant="secondary" size="lg">
-            Open dashboard
+          <ButtonLink href={ROUTES.console} variant="secondary" size="lg">
+            Open the console
           </ButtonLink>
         </div>
       </main>

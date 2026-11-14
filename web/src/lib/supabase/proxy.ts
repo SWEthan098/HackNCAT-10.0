@@ -9,7 +9,7 @@ import { ROUTES, homeFor, isGuestOnly, isProtected, roleRedirect } from "@/lib/r
  * 2. Verifies the session with getClaims() (signature checked against the project's JWKS),
  *    never trusting the cookie contents on their own.
  * 3. Redirects: protected route without a user -> /login?next=..., guest-only route with a
- *    user -> their home (/redteam for red_team accounts, /dashboard otherwise).
+ *    user -> their home (/redteam for red_team, /approve for approvers, /console otherwise).
  * 4. Role split: red_team accounts only get /redteam; everyone else is kept out of /redteam
  *    (see roleRedirect in lib/routes.ts).
  */

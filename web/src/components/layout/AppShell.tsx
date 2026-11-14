@@ -12,14 +12,10 @@ import { Wordmark } from "./Wordmark";
 export const NAV_ITEMS = [
   { href: ROUTES.console, label: "Console" },
   { href: ROUTES.redteam, label: "Red Team" },
-  { href: ROUTES.dashboard, label: "Overview" },
-  { href: ROUTES.profile, label: "Profile" },
-  { href: ROUTES.system, label: "System" },
-  { href: ROUTES.ai, label: "AI" },
 ];
 
 function isActive(pathname: string, href: string) {
-  return href === ROUTES.dashboard ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 /** Top bar shell for signed-in screens. Links wrap into a second row under 40rem. */

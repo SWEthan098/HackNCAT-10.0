@@ -42,7 +42,6 @@ export function AccountMenu({ tone = "paper", emailFrom = "sm" }: { tone?: "pape
         }
         items={[
           { type: "label", label: `Signed in as ${user.email}` },
-          { type: "link", label: "Profile", href: ROUTES.profile, icon: <IconUser size={16} /> },
           { type: "link", label: "Change password", href: ROUTES.resetPassword, icon: <IconKey size={16} /> },
           { type: "action", label: "Log out", danger: true, onSelect: () => setConfirmOut(true) },
         ]}

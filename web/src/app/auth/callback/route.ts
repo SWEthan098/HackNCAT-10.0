@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
-  const next = safeNextPath(searchParams.get("next"), type === "recovery" ? ROUTES.resetPassword : ROUTES.dashboard);
+  const next = safeNextPath(searchParams.get("next"), type === "recovery" ? ROUTES.resetPassword : ROUTES.console);
 
   const success = NextResponse.redirect(new URL(next, request.url));
   const supabase = createServerClient(

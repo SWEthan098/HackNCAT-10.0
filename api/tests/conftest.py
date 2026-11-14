@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import time
 import uuid
+from datetime import UTC, datetime
 
 os.environ.update(
     {
@@ -52,6 +55,18 @@ class _Result:
         self.data = data
 
 
+class _Rpc:
+    def __init__(self, data):
+        self._data = data
+
+    def execute(self):
+        return _Result(self._data)
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 class _Query:
     def __init__(self, table: _FakeTable, op: str, payload=None, **opts):
         self.table, self.op, self.payload, self.opts, self.filters = table, op, payload, opts, []
@@ -83,6 +98,10 @@ class _Query:
             row = {"display_name": None, "avatar_url": None, "created_at": None, "updated_at": None, **self.payload}
             rows.append(row)
             return _Result([dict(row)])
+        if self.op == "insert":
+            row = {"id": str(uuid.uuid4()), "created_at": _now_iso(), **self.table.defaults, **self.payload}
+            rows.append(row)
+            return _Result([dict(row)])
         if self.op == "update":
             hit = [r for r in rows if self._match(r)]
             for r in hit:
@@ -92,8 +111,12 @@ class _Query:
 
 
 class _FakeTable:
-    def __init__(self):
+    def __init__(self, defaults: dict | None = None):
         self.rows: list[dict] = []
+        self.defaults = defaults or {}
+
+    def insert(self, payload):
+        return _Query(self, "insert", payload)
 
     def select(self, *_a, **_k):
         return _Query(self, "select")
@@ -107,7 +130,34 @@ class _FakeTable:
 
 class FakeDB:
     def __init__(self):
-        self.tables = {"profiles": _FakeTable()}
+        self.tables = {
+            "profiles": _FakeTable(),
+            "user_roles": _FakeTable(),
+            "events": _FakeTable({"incident_id": None, "raw_features": None}),
+            "incidents": _FakeTable(),
+            "audit_log": _FakeTable(),
+        }
+
+    def rpc(self, name, params=None):
+        """Stand-in for the SQL functions the engine calls."""
+        if name != "audit_append":
+            raise NotImplementedError(name)
+        log = self.tables["audit_log"].rows
+        prev = log[-1]["hash"] if log else None
+        row = {
+            "id": len(log) + 1,
+            "created_at": _now_iso(),
+            "actor": params["p_actor"],
+            "action": params["p_action"],
+            "detail": params.get("p_detail") or {},
+            "prev_hash": prev,
+        }
+        row["hash"] = hashlib.sha256(json.dumps([prev or "", row], sort_keys=True).encode()).hexdigest()
+        log.append(row)
+        return _Rpc(dict(row))
+
+    def grant_role(self, user_id: str, role: str) -> None:
+        self.tables["user_roles"].rows.append({"user_id": user_id, "role": role})
 
     def table(self, name):
         return self.tables[name]

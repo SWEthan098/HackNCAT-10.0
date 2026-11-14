@@ -368,18 +368,19 @@ brand-new injection styles may slip past the scanner (hard rules still contain t
 ## 11. MITRE ATT&CK + ATLAS
 
 IDs come ONLY from the lookup table in `api/schemas/mitre.py` (Daylen, frozen), never from a model.
-Daylen verifies the VERIFY ones on attack.mitre.org / atlas.mitre.org, then the table is frozen.
+Verified 2026-11-13 against ATT&CK v20.1 and ATLAS 2026.10; the table is now frozen. Two IDs changed
+(T1656 -> T1684.001, AML.T0057 -> AML.T0086); the table keys did not.
 
 ```text
 STAGE / EVENT                     FRAMEWORK  TACTIC                    TECHNIQUE
 Stage 1  bot password guessing    ATT&CK     Credential Access         T1110.004 Brute Force: Credential Stuffing
 Stage 1  bot gets into j.smith    ATT&CK     Initial Access            T1078 Valid Accounts
 Stage 2  fake CFO message         ATT&CK     Lateral Movement          T1534 Internal Spearphishing
-Stage 2  pretending to be CFO     ATT&CK     Defense Evasion           T1656 Impersonation (VERIFY vs T1684.001)
+Stage 2  pretending to be CFO     ATT&CK     Stealth                   T1684.001 Social Engineering: Impersonation
 Stage 2  wire money request       ATT&CK     Impact                    T1657 Financial Theft
 Stage 3  hidden email instruction ATLAS      Execution                 AML.T0051.001 LLM Prompt Injection: Indirect
 Stage 3  agent tries send_email   ATLAS      (agent action)            AML.T0053 AI Agent Tool Invocation
-Stage 3  payroll leak attempt     ATLAS      Exfiltration              AML.T0057 LLM Data Leakage (VERIFY replacement)
+Stage 3  payroll leak attempt     ATLAS      Exfiltration              AML.T0086 Exfiltration via AI Agent Tool Invocation
 Audience typed attack (/attack)   ATLAS      Execution                 AML.T0051.000 LLM Prompt Injection: Direct
 Audience jailbreak attempt        ATLAS      Priv. Esc./Def. Evasion   AML.T0054 LLM Jailbreak
 Obfuscated attack (any)           ATLAS      Defense Evasion           AML.T0068 LLM Prompt Obfuscation

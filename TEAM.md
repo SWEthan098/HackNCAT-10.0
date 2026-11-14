@@ -6,14 +6,12 @@ allowed to touch it: anyone can pick up any issue. Re-balance once the challenge
 | Member | GitHub | Role | Owns | Branch |
 | --- | --- | --- | --- | --- |
 | Ethan (P1) | @SWEthan098 | Firewall Lead + AI Analyst + Deploy Owner | `api/firewall`, `api/agents`, `api/analyst`, routers `attack`/`analyst`; Railway + Vercel | `p1-firewall` |
-| Miles (P2) | `@<github-username>` | AI Lead + Red Team + Attack Picker; pitch lead | `api/detectors`, `api/services/ai`, `api/sensors`, `api/redteam`, routers `sensors`/`redteam`/`playground`, `web/src/app/redteam` | `p2-ai` |
-| Daylen (P3) | `@<github-username>` | Core + Data + Deploy Backup | `api/main.py`, `api/core`, `api/schemas`, `api/engine`, other routers, `supabase/migrations`, CI | `p3-core` |
-| Jordan (P4) | `@<github-username>` | Frontend (Defender Console) | all of `web/` except `web/src/app/redteam` | `p4-web` |
+| Miles (P2) | @Bebop1023 | AI Lead + Red Team + Attack Picker; pitch lead | `api/detectors`, `api/services/ai`, `api/sensors`, `api/redteam`, routers `sensors`/`redteam`/`playground`, `web/src/app/redteam` | `p2-ai` |
+| Daylen (P3) | @dhicks11 | Core + Data + Deploy Backup | `api/main.py`, `api/core`, `api/schemas`, `api/engine`, other routers, `supabase/migrations`, CI | `p3-core` |
+| Jordan (P4) | @jtoospeedy | Frontend (Defender Console) | all of `web/` except `web/src/app/redteam` | `p4-web` |
 
 **Kairos ownership is exact and enforced by [CODEOWNERS](.github/CODEOWNERS): see [docs/KAIROS.md](docs/KAIROS.md).
 The sections below are from the starter and are superseded where they disagree.**
-
-Fill in the GitHub usernames once everyone has accepted the collaborator invite.
 
 ## Responsibilities
 

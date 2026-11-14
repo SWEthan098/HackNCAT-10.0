@@ -33,7 +33,7 @@ export function AuthHashHandler() {
       .auth.setSession({ access_token: accessToken!, refresh_token: refreshToken! })
       .then(({ error }) => {
         if (error) window.location.replace(`${ROUTES.login}?error=link_invalid`);
-        else window.location.replace(type === "recovery" ? ROUTES.resetPassword : ROUTES.dashboard);
+        else window.location.replace(type === "recovery" ? ROUTES.resetPassword : ROUTES.console);
       });
   }, []);
   return null;

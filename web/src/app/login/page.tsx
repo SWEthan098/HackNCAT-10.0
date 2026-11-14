@@ -7,6 +7,7 @@ import { useFormField } from "@/components/auth/useFormField";
 import { AuthShell } from "@/components/layout/AuthShell";
 import { Alert, Button, Field, PasswordField } from "@/components/ui";
 import { authErrorMessage, normalizeEmail, validateEmail } from "@/lib/auth/validation";
+import { buildLoginFeatures, sendLoginSignal } from "@/lib/loginSignals";
 import { ROUTES, safeNextPath } from "@/lib/routes";
 import { createClient } from "@/lib/supabase/client";
 
@@ -27,6 +28,10 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const inFlight = useRef(false);
+  // Login Guard signals: form-level timing only (see lib/loginSignals.ts for the rules).
+  const pageLoadedAt = useRef<number | null>(null);
+  pageLoadedAt.current ??= typeof performance !== "undefined" ? performance.now() : null;
+  const attempts = useRef(0);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,8 +41,14 @@ function LoginForm() {
     inFlight.current = true;
     setLoading(true);
     setError(null);
+    const account = normalizeEmail(email.value);
+    attempts.current += 1;
+    // Fire and forget, in parallel with the sign-in: never delays or blocks the login.
+    if (pageLoadedAt.current !== null) {
+      void sendLoginSignal(account, buildLoginFeatures(pageLoadedAt.current, performance.now(), attempts.current));
+    }
     const { error: authError } = await createClient().auth.signInWithPassword({
-      email: normalizeEmail(email.value),
+      email: account,
       password: password.value,
     });
     if (authError) {
@@ -110,6 +121,12 @@ export default function LoginPage() {
       <Suspense>
         <LoginForm />
       </Suspense>
+      <p className="mt-6 border-t border-rule pt-4 text-sm leading-relaxed text-muted">
+        Kairos Login Guard checks each sign-in attempt using only the account email, when it
+        happened, and how long this form was open. It never records your password, what you
+        type, or how you type it. Raw signal data is deleted after 24 hours; only scores are
+        kept.
+      </p>
     </AuthShell>
   );
 }

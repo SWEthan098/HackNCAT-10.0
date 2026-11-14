@@ -53,7 +53,7 @@ export default function SignupPage() {
     if (duplicate) return done({ tone: "error", duplicate: true, text: "An account with this email already exists." });
     if (error) return done({ tone: "error", text: authErrorMessage(error) });
     if (data.session) {
-      router.replace(ROUTES.dashboard);
+      router.replace(ROUTES.console);
       router.refresh();
       return;
     }

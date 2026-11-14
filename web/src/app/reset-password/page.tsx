@@ -50,8 +50,8 @@ export default function ResetPasswordPage() {
           <Alert tone="success" title="Password updated">
             Use your new password the next time you log in.
           </Alert>
-          <ButtonLink href={ROUTES.dashboard} size="lg" className="w-full">
-            Go to dashboard
+          <ButtonLink href={ROUTES.console} size="lg" className="w-full">
+            Go to the console
           </ButtonLink>
         </div>
       ) : (

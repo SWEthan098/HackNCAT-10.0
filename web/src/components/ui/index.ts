@@ -3,7 +3,7 @@ export { Button, ButtonLink, buttonClasses } from "./Button";
 export { Card, DashboardCard, Stat } from "./Card";
 export { cn } from "./cn";
 export { Dropdown, type DropdownItem } from "./Dropdown";
-export { Field, PasswordField, inputClasses } from "./Field";
+export { Field, PasswordField, TextAreaField, inputClasses } from "./Field";
 export * from "./Icons";
 export { ConfirmDialog, Modal } from "./Modal";
 export { NavCard, NavCardGrid } from "./NavCard";

@@ -50,20 +50,22 @@ test("isDuplicateSignup detects the obfuscated duplicate user", () => {
 });
 
 test("safeNextPath blocks open redirects", () => {
-  expect(safeNextPath("/dashboard/profile")).toBe("/dashboard/profile");
-  expect(safeNextPath("https://evil.example")).toBe("/dashboard");
-  expect(safeNextPath("//evil.example")).toBe("/dashboard");
-  expect(safeNextPath("/\\evil.example")).toBe("/dashboard");
-  expect(safeNextPath(null)).toBe("/dashboard");
+  expect(safeNextPath("/console/incidents/x")).toBe("/console/incidents/x");
+  expect(safeNextPath("https://evil.example")).toBe("/console");
+  expect(safeNextPath("//evil.example")).toBe("/console");
+  expect(safeNextPath("/\\evil.example")).toBe("/console");
+  expect(safeNextPath(null)).toBe("/console");
 });
 
 test("route classification", () => {
-  expect(isProtected("/dashboard")).toBe(true);
-  expect(isProtected("/dashboard/profile")).toBe(true);
+  expect(isProtected("/console")).toBe(true);
+  expect(isProtected("/console/incidents/x")).toBe(true);
+  expect(isProtected("/approve")).toBe(true);
+  expect(isProtected("/redteam")).toBe(true);
   expect(isProtected("/reset-password")).toBe(true);
-  expect(isProtected("/dashboardx")).toBe(false);
+  expect(isProtected("/consolex")).toBe(false);
   expect(isProtected("/login")).toBe(false);
   expect(isGuestOnly("/login")).toBe(true);
   expect(isGuestOnly("/signup")).toBe(true);
-  expect(isGuestOnly("/dashboard")).toBe(false);
+  expect(isGuestOnly("/console")).toBe(false);
 });

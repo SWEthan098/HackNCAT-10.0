@@ -1,0 +1,529 @@
+/* Hallmark · screen: /attack (public Attack Picker) · theme: Cobalt, dark graphite surface scoped to .atk · signature: the response ladder (watched, slowed, challenged, blocked) · states: idle, running, result, offline, busy, rejected */
+/* Colours for this page only, built from tokens.css. The token block is keyed to the page's
+ * root element (data-theme="kairos-attack"), so nothing here leaks to other pages. */
+[data-theme="kairos-attack"] {
+  color-scheme: dark;
+  --atk-bg: var(--color-graphite);
+  --atk-panel: var(--color-graphite-2);
+  --atk-raise: oklch(31% 0.032 262);
+  --atk-well: oklch(18% 0.022 262);
+  --atk-ink: var(--color-graphite-ink);
+  --atk-ink-2: oklch(84% 0.014 254);
+  --atk-muted: var(--color-graphite-muted);
+  --atk-rule: oklch(35% 0.03 262);
+  --atk-rule-2: oklch(44% 0.04 260);
+  --atk-cobalt: var(--color-accent);
+  --atk-cobalt-deep: var(--color-accent-deep);
+  --atk-cobalt-edge: var(--color-accent-edge);
+  --atk-cobalt-glow: oklch(52% 0.19 258 / 0.6);
+  --atk-signal: var(--color-accent-2);
+  --atk-signal-wash: oklch(76% 0.13 254 / 0.12);
+  --atk-selection: oklch(76% 0.13 254 / 0.35);
+  --atk-on-cobalt: var(--color-accent-ink);
+  /* Response ladder, light enough to read on graphite (AA for text at 14px+). */
+  --atk-watched: oklch(76% 0.06 250);
+  --atk-slowed: oklch(84% 0.13 90);
+  --atk-challenged: oklch(78% 0.14 58);
+  --atk-blocked: oklch(70% 0.18 27);
+  --atk-harmless: oklch(79% 0.14 152);
+  --atk-breach: oklch(70% 0.2 350);
+  --color-focus: var(--color-accent-2);
+}
+.atk {
+  background: var(--atk-bg);
+  color: var(--atk-ink);
+  caret-color: var(--atk-signal);
+}
+.atk ::selection {
+  background: var(--atk-selection);
+  color: var(--atk-ink);
+}
+/* The body behind the page (overscroll on phones) matches the page. */
+body:has(.atk) {
+  background: var(--color-graphite);
+}
+
+.atk-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  font-size: clamp(2.6rem, 11vw, 4.25rem);
+  max-width: 11ch;
+  overflow-wrap: break-word;
+  min-width: 0;
+  text-wrap: balance;
+}
+
+.atk-panel {
+  background: var(--atk-panel);
+  border: 1px solid var(--atk-rule);
+  border-radius: 14px;
+}
+.atk-well {
+  background: var(--atk-well);
+  border: 1px solid var(--atk-rule);
+  border-radius: var(--radius-input);
+}
+.atk-rule {
+  border-color: var(--atk-rule);
+}
+.atk-muted {
+  color: var(--atk-muted);
+}
+.atk-ink-2 {
+  color: var(--atk-ink-2);
+}
+.atk-signal {
+  color: var(--atk-signal);
+}
+
+/* Picker tiles and segmented options: native radios, the label is the target. */
+.atk-choice {
+  position: relative;
+  display: flex;
+  cursor: pointer;
+  border: 1px solid var(--atk-rule-2);
+  border-radius: var(--radius-input);
+  background: var(--atk-raise);
+  color: var(--atk-ink-2);
+  transition: background-color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out);
+}
+@media (hover: hover) {
+  .atk-choice:hover {
+    border-color: var(--atk-signal);
+    color: var(--atk-ink);
+  }
+}
+.atk-choice:active {
+  background: var(--atk-well);
+}
+.atk-choice:has(input:checked) {
+  background: var(--atk-signal-wash);
+  border-color: var(--atk-signal);
+  color: var(--atk-ink);
+  box-shadow: inset 0 0 0 1px var(--atk-signal);
+}
+.atk-choice:has(input:focus-visible) {
+  outline: 2px solid var(--atk-signal);
+  outline-offset: 2px;
+}
+.atk-choice:has(input:disabled) {
+  cursor: not-allowed;
+  background: var(--atk-panel);
+  color: var(--atk-muted);
+  border-style: dashed;
+}
+.atk-tile-icon {
+  color: var(--atk-muted);
+}
+.atk-choice:has(input:checked) .atk-tile-icon {
+  color: var(--atk-signal);
+}
+
+/* Launch key: the cobalt keycap, sized for thumbs. */
+.atk-launch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  min-height: 56px;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: var(--atk-cobalt);
+  color: var(--atk-on-cobalt);
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 4px 0 0 var(--atk-cobalt-edge), 0 10px 18px -8px var(--atk-cobalt-glow);
+  transition: transform var(--dur-micro) var(--ease-out), box-shadow var(--dur-micro) var(--ease-out),
+    background-color var(--dur-micro) var(--ease-out);
+}
+@media (hover: hover) {
+  .atk-launch:not(:disabled):hover {
+    background: var(--atk-cobalt-deep);
+  }
+}
+.atk-launch:not(:disabled):active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 0 var(--atk-cobalt-edge);
+}
+.atk-launch:focus-visible {
+  outline: 2px solid var(--atk-signal);
+  outline-offset: 3px;
+}
+.atk-launch:disabled {
+  cursor: not-allowed;
+  background: var(--atk-raise);
+  color: var(--atk-muted);
+  box-shadow: 0 4px 0 0 var(--atk-well);
+}
+
+/* Quiet secondary buttons (chips, try again). */
+.atk-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 44px;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--atk-rule-2);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--atk-ink);
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out);
+}
+@media (hover: hover) {
+  .atk-ghost:not(:disabled):hover {
+    border-color: var(--atk-signal);
+    background: var(--atk-signal-wash);
+  }
+}
+.atk-ghost:not(:disabled):active {
+  background: var(--atk-well);
+}
+.atk-ghost:focus-visible {
+  outline: 2px solid var(--atk-signal);
+  outline-offset: 2px;
+}
+.atk-ghost:disabled {
+  cursor: not-allowed;
+  color: var(--atk-muted);
+  border-style: dashed;
+}
+
+/* Switch (sneaky mode). */
+.atk-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--atk-rule-2);
+  border-radius: var(--radius-input);
+  background: var(--atk-raise);
+  color: var(--atk-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.atk-switch:active {
+  background: var(--atk-well);
+}
+.atk-switch:focus-visible {
+  outline: 2px solid var(--atk-signal);
+  outline-offset: 2px;
+}
+.atk-switch:disabled {
+  cursor: not-allowed;
+  color: var(--atk-muted);
+}
+.atk-switch-track {
+  position: relative;
+  flex: none;
+  width: 48px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--atk-well);
+  border: 1px solid var(--atk-rule-2);
+  transition: background-color var(--dur-short) var(--ease-out);
+}
+.atk-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--atk-muted);
+  transition: transform var(--dur-short) var(--ease-out), background-color var(--dur-short) var(--ease-out);
+}
+.atk-switch[aria-checked="true"] .atk-switch-track {
+  background: var(--atk-cobalt);
+  border-color: var(--atk-signal);
+}
+.atk-switch[aria-checked="true"] .atk-switch-track::after {
+  transform: translateX(20px);
+  background: var(--atk-on-cobalt);
+}
+
+/* Range sliders: a 44px hit area around a thin track. */
+.atk-range {
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--atk-signal);
+  cursor: pointer;
+}
+.atk-range:focus-visible {
+  outline: 2px solid var(--atk-signal);
+  outline-offset: 2px;
+  border-radius: var(--radius-input);
+}
+.atk-range:disabled {
+  cursor: not-allowed;
+  accent-color: var(--atk-muted);
+}
+
+/* The trick text box. */
+.atk-textarea {
+  display: block;
+  width: 100%;
+  min-height: 140px;
+  padding: var(--space-sm);
+  border: 1px solid var(--atk-rule-2);
+  border-radius: var(--radius-input);
+  background: var(--atk-well);
+  color: var(--atk-ink);
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+.atk-textarea::placeholder {
+  color: var(--atk-muted);
+}
+.atk-textarea:focus-visible {
+  outline-color: var(--atk-signal);
+}
+.atk-textarea[aria-invalid="true"] {
+  border-color: var(--atk-blocked);
+}
+.atk-textarea:disabled {
+  cursor: not-allowed;
+  color: var(--atk-muted);
+}
+
+/* Mission card: the brief for Trick the AI, set off by a cobalt edge. */
+.atk-mission {
+  border: 1px solid var(--atk-signal);
+  background: var(--atk-signal-wash);
+  border-radius: var(--radius-input);
+}
+
+/* ---- Response ladder (the signature) ---- */
+.atk-ladder {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-xs);
+  align-items: end;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.atk-ladder li {
+  --step: var(--atk-watched);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+.atk-ladder li[data-step="slowed"] {
+  --step: var(--atk-slowed);
+}
+.atk-ladder li[data-step="challenged"] {
+  --step: var(--atk-challenged);
+}
+.atk-ladder li[data-step="blocked"] {
+  --step: var(--atk-blocked);
+}
+.atk-ladder-bar {
+  display: block;
+  border-radius: 4px 4px 2px 2px;
+  background: var(--step);
+  transform-origin: bottom;
+}
+.atk-ladder li:nth-child(1) .atk-ladder-bar {
+  height: 16px;
+}
+.atk-ladder li:nth-child(2) .atk-ladder-bar {
+  height: 28px;
+}
+.atk-ladder li:nth-child(3) .atk-ladder-bar {
+  height: 40px;
+}
+.atk-ladder li:nth-child(4) .atk-ladder-bar {
+  height: 52px;
+}
+.atk-ladder-label {
+  font-size: var(--text-sm);
+  color: var(--atk-ink-2);
+  overflow-wrap: anywhere;
+}
+/* Result mode: steps above your level go dark, your step is named and bold. */
+.atk-ladder[data-mode="result"] li[data-state="off"] .atk-ladder-bar {
+  background: var(--atk-raise);
+}
+.atk-ladder[data-mode="result"] li[data-state="off"] .atk-ladder-label {
+  color: var(--atk-muted);
+}
+.atk-ladder[data-mode="result"] li[data-state="current"] .atk-ladder-label {
+  color: var(--step);
+  font-weight: 600;
+}
+.atk-ladder[data-mode="result"] li:not([data-state="off"]) .atk-ladder-bar {
+  animation: atk-rise var(--dur-long) var(--ease-out) both;
+}
+.atk-ladder[data-mode="result"] li:nth-child(2) .atk-ladder-bar {
+  animation-delay: 90ms;
+}
+.atk-ladder[data-mode="result"] li:nth-child(3) .atk-ladder-bar {
+  animation-delay: 180ms;
+}
+.atk-ladder[data-mode="result"] li:nth-child(4) .atk-ladder-bar {
+  animation-delay: 270ms;
+}
+@keyframes atk-rise {
+  from {
+    transform: scaleY(0.05);
+  }
+}
+
+/* Outcome colours for result headings and the layer list. */
+.atk-tone-watched {
+  color: var(--atk-watched);
+}
+.atk-tone-slowed {
+  color: var(--atk-slowed);
+}
+.atk-tone-challenged,
+.atk-tone-flagged {
+  color: var(--atk-challenged);
+}
+.atk-tone-blocked {
+  color: var(--atk-blocked);
+}
+.atk-tone-harmless,
+.atk-tone-passed {
+  color: var(--atk-harmless);
+}
+.atk-tone-breach {
+  color: var(--atk-breach);
+}
+.atk-tone-skipped {
+  color: var(--atk-muted);
+}
+
+/* Log lines: what an attacker sees, monospace because it is machine output. */
+.atk-log {
+  font-family: var(--font-outlier);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--atk-ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.atk-code {
+  font-family: var(--font-outlier);
+  font-size: 0.8125rem;
+}
+
+/* Live dot: only shown while the counter is actually live. */
+.atk-live-dot {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--atk-harmless);
+}
+.atk-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--atk-harmless);
+  animation: atk-pulse 2s var(--ease-out) infinite;
+}
+@keyframes atk-pulse {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+@keyframes atk-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+.atk-cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1em;
+  vertical-align: text-bottom;
+  background: var(--atk-signal);
+  animation: atk-blink 1s steps(1) infinite;
+}
+
+/* Step 10: the defense layers land one by one; the depth line arrives last. */
+.atk-layer-reveal {
+  animation: atk-layer-in var(--dur-short) var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 340ms);
+}
+@keyframes atk-layer-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Inline text action (the appeal link) and the appeal textarea. */
+.atk-link {
+  color: var(--atk-signal);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+.atk-link:hover {
+  color: var(--atk-ink);
+}
+.atk-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.atk-input {
+  background: var(--atk-well);
+  border: 1px solid var(--atk-rule-2);
+  border-radius: var(--radius-input);
+  color: var(--atk-ink);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 16px;
+  line-height: 1.5;
+  outline: 2px solid transparent;
+  outline-offset: -3px;
+}
+.atk-input:focus-visible {
+  outline-color: var(--color-focus);
+}
+.atk-input[aria-invalid="true"] {
+  border-color: var(--atk-tone-blocked);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atk-layer-reveal {
+    animation-duration: 0.01ms;
+    animation-delay: 0s;
+  }
+
+  .atk-ladder[data-mode="result"] li .atk-ladder-bar,
+  .atk-live-dot::after,
+  .atk-cursor {
+    animation: none;
+  }
+}

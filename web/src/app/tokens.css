@@ -27,3 +27,66 @@
   --shadow-key-press: inset 0 1px 2px oklch(21% 0.028 262 / 0.14);
   --tracking-display: -0.028em; --display-weight: 600;
 }
+
+/* SOC theme ("night shift"): the Defender Console, the approver's phone and the sign-in pages.
+ * Blue-slate surfaces in three depths, cobalt for anything you can operate, and the four risk
+ * levels as the only warm colours on screen, so severity is what the eye lands on first.
+ * Type is one superfamily: Plex Sans Condensed for heads and figures, Plex Sans for reading,
+ * Plex Mono for the things analysts copy (ids, actors, technique ids, timestamps).
+ * While a [data-theme="soc"] surface is mounted the tokens apply to the whole document, so the body,
+ * toasts and dialogs follow; the attribute itself is the fallback scope. */
+:root:has([data-theme="soc"]),
+[data-theme="soc"] {
+  color-scheme: dark;
+  --color-paper: oklch(17.5% 0.024 262);
+  --color-paper-2: oklch(21% 0.028 261);
+  --color-paper-3: oklch(25.5% 0.032 260);
+  --color-ink: oklch(95% 0.008 250);
+  --color-ink-2: oklch(84% 0.016 254);
+  --color-muted: oklch(70% 0.022 256);
+  --color-rule: oklch(29.5% 0.03 260);
+  --color-rule-2: oklch(38% 0.034 259);
+  --color-graphite: oklch(14% 0.022 263);
+  --color-graphite-2: oklch(24% 0.03 261);
+  --color-graphite-ink: oklch(95% 0.008 250);
+  --color-graphite-muted: oklch(73% 0.022 256);
+  --color-accent: oklch(72% 0.14 258);
+  --color-accent-2: oklch(78% 0.12 255);
+  --color-accent-deep: oklch(83% 0.1 256);
+  --color-accent-wash: oklch(29% 0.07 259);
+  --color-accent-ink: oklch(18% 0.04 262);
+  --color-accent-edge: oklch(50% 0.15 260);
+  --color-focus: oklch(80% 0.12 255);
+  --color-error: oklch(72% 0.16 25);
+  --color-error-fill: oklch(52% 0.2 26);
+  --color-error-edge: oklch(36% 0.15 26);
+  --color-on-error-fill: oklch(99% 0.004 250);
+  --color-success: oklch(77% 0.14 155);
+  --color-key-face: oklch(28.5% 0.032 260);
+  --color-key-edge: oklch(11% 0.02 262);
+  --color-scrim: oklch(8% 0.02 262 / 0.74);
+  --color-level-low: oklch(64% 0.02 258);
+  --color-level-medium: oklch(86% 0.16 92);
+  --color-level-high: oklch(76% 0.16 58);
+  --color-level-critical: oklch(65% 0.21 26);
+  --color-level-medium-wash: oklch(31% 0.06 90);
+  --color-level-medium-ink: oklch(90% 0.13 95);
+  --color-level-high-wash: oklch(31% 0.07 52);
+  --color-level-high-ink: oklch(82% 0.13 60);
+  --color-level-critical-wash: oklch(30.5% 0.09 25);
+  --color-level-critical-ink: oklch(76% 0.15 24);
+  --color-attack-wash: oklch(29% 0.07 259);
+  --color-attack-ink: oklch(86% 0.08 255);
+  --color-atlas-wash: oklch(29% 0.08 305);
+  --color-atlas-ink: oklch(87% 0.08 305);
+  --shadow-card: 0 1px 0 oklch(0% 0 0 / 0.3);
+  --shadow-key: 0 2px 0 0 var(--color-key-edge), inset 0 1px 0 oklch(100% 0 0 / 0.08);
+  --shadow-key-accent: 0 2px 0 0 var(--color-accent-edge), inset 0 1px 0 oklch(100% 0 0 / 0.35);
+  --shadow-key-danger: 0 2px 0 0 var(--color-error-edge), inset 0 1px 0 oklch(100% 0 0 / 0.2);
+  --shadow-key-press: inset 0 1px 2px oklch(0% 0 0 / 0.45);
+  --font-display: var(--font-plex-condensed), "IBM Plex Sans Condensed", system-ui, sans-serif;
+  --font-outlier: var(--font-plex-mono), ui-monospace, monospace;
+  --tracking-display: -0.004em;
+  --radius-card: 6px;
+  --radius-input: 4px;
+}

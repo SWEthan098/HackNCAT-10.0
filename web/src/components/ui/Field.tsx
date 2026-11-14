@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { useId, useState, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { cn } from "./cn";
 import { IconAlert, IconEye, IconEyeOff } from "./Icons";
 
@@ -75,5 +75,40 @@ export function PasswordField(props: Omit<FieldProps, "type" | "trailing">) {
         </button>
       }
     />
+  );
+}
+
+type TextAreaFieldProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "id"> & {
+  label: string;
+  helper?: ReactNode;
+  error?: string | null;
+  id?: string;
+};
+
+/** Multi-line twin of Field: same label, helper/error line and ARIA wiring. */
+export function TextAreaField({ label, helper, error, id, required, className, ...rest }: TextAreaFieldProps) {
+  const autoId = useId();
+  const inputId = id ?? autoId;
+  const hintId = `${inputId}-hint`;
+  const hint = error ?? helper;
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <label htmlFor={inputId} className="text-sm font-medium text-ink">
+        {label}
+        {required && <span className="font-normal text-muted"> (required)</span>}
+      </label>
+      <textarea
+        id={inputId}
+        className={cn(inputClasses, "h-auto min-h-24 resize-y py-2 leading-normal")}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={hint ? hintId : undefined}
+        aria-required={required || undefined}
+        required={required}
+        {...rest}
+      />
+      <p id={hintId} className={cn("min-h-[1lh] text-sm", error ? "text-error" : "text-muted")} aria-live="polite">
+        {hint}
+      </p>
+    </div>
   );
 }

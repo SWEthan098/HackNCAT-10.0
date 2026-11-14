@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { ROUTES, isGuestOnly, isProtected } from "@/lib/routes";
+import { ROUTES, homeFor, isGuestOnly, isProtected, roleRedirect } from "@/lib/routes";
 
 /**
  * Runs on every matched request (see src/proxy.ts):
@@ -9,7 +9,9 @@ import { ROUTES, isGuestOnly, isProtected } from "@/lib/routes";
  * 2. Verifies the session with getClaims() (signature checked against the project's JWKS),
  *    never trusting the cookie contents on their own.
  * 3. Redirects: protected route without a user -> /login?next=..., guest-only route with a
- *    user -> /dashboard.
+ *    user -> their home (/redteam for red_team, /approve for approvers, /console otherwise).
+ * 4. Role split: red_team accounts only get /redteam; everyone else is kept out of /redteam
+ *    (see roleRedirect in lib/routes.ts).
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -51,8 +53,17 @@ export async function updateSession(request: NextRequest) {
   if (!signedIn && isProtected(pathname)) {
     return redirectTo(ROUTES.login, { next: pathname + search });
   }
-  if (signedIn && isGuestOnly(pathname)) {
-    return redirectTo(ROUTES.dashboard);
-  }
+  if (!signedIn || !(isProtected(pathname) || isGuestOnly(pathname))) return response;
+
+  // Roles only matter on pages we guard, so public pages skip this query. RLS returns only
+  // this user's own rows. If the lookup fails, the account is treated as having no roles:
+  // that keeps it out of /redteam (fails closed there) while the console stays reachable;
+  // console data is still protected by RLS and the API.
+  const { data: rows, error } = await supabase.from("user_roles").select("role");
+  const roles = error || !rows ? [] : rows.map((r: { role: string }) => r.role);
+
+  if (isGuestOnly(pathname)) return redirectTo(homeFor(roles));
+  const elsewhere = roleRedirect(pathname, roles);
+  if (elsewhere) return redirectTo(elsewhere);
   return response;
 }

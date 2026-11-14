@@ -11,6 +11,8 @@ import { useToast } from "@/components/ui/Toast";
 type AuthState = {
   user: User | null;
   loading: boolean;
+  /** This user's roles from public.user_roles. null until loaded; [] if none (or the lookup failed). */
+  roles: string[] | null;
   signOut: () => Promise<void>;
   /** Fresh access token (auto-refreshed by supabase-js when close to expiry). */
   getAccessToken: () => Promise<string | null>;
@@ -30,6 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { notify } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [roles, setRoles] = useState<string[] | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
@@ -43,6 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setUser(data.user);
       setLoading(false);
+      // RLS returns only this user's own rows.
+      supabase
+        .from("user_roles")
+        .select("role")
+        .then(({ data: rows, error: rolesError }) => {
+          if (active) setRoles(rolesError || !rows ? [] : rows.map((r: { role: string }) => r.role));
+        });
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session: Session | null) => {
       if (event === "SIGNED_OUT") {
@@ -90,7 +100,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [getAccessToken, notify],
   );
 
-  const value = useMemo(() => ({ user, loading, signOut, getAccessToken, api }), [user, loading, signOut, getAccessToken, api]);
+  const value = useMemo(
+    () => ({ user, loading, roles, signOut, getAccessToken, api }),
+    [user, loading, roles, signOut, getAccessToken, api],
+  );
   return <AuthContext value={value}>{children}</AuthContext>;
 }
 

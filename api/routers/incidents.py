@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 
 import engine
 from auth import AuthUser, current_user
 from core.db import get_db
+from core.roles import DEFENDER_ROLES, require_any_role, user_identities
 from schemas.kairos import Approval, FalsePositiveRequest, Incident, IncidentDetail, Source
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -37,8 +38,28 @@ def request_containment(incident_id: str, user: AuthUser = Depends(current_user)
     return Approval(**engine.create_approval(db, incident_id, requested_by=f"user:{user.id}"))
 
 
-@router.post("/{incident_id}/false-positive", response_model=Incident, summary="Mark an incident as a false positive")
+@router.post(
+    "/{incident_id}/false-positive",
+    response_model=Incident,
+    summary="Mark an incident as a false positive (High/Critical: an approver confirms first)",
+    responses={202: {"model": Incident, "description": "High/Critical: waiting for an approver to confirm"}},
+)
 def mark_false_positive(
-    incident_id: str, body: FalsePositiveRequest, user: AuthUser = Depends(current_user), db=Depends(get_db)
+    incident_id: str,
+    body: FalsePositiveRequest,
+    response: Response,
+    user: AuthUser = Depends(require_any_role(*DEFENDER_ROLES)),
+    db=Depends(get_db),
 ) -> Incident:
-    return engine.mark_false_positive(db, incident_id, reason=body.reason, user_id=user.id)
+    """Analyst or approver role. Refused (403) if you appear in the incident's events.
+
+    Low/Medium: 200, closed as a false positive. High/Critical: 202, the incident is returned
+    unchanged and a confirmation request goes to the approver's phone; a different person
+    must approve it. Pending containment stays tappable until then.
+    """
+    incident, approval = engine.mark_false_positive(
+        db, incident_id, reason=body.reason, user_id=user.id, identities=user_identities(user)
+    )
+    if approval is not None:
+        response.status_code = 202
+    return incident

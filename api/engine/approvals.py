@@ -5,6 +5,13 @@ answers before the timeout the approval expires: paused actions stay paused, not
 
 Approval text is built here from code templates and sanitized names only. It never contains
 attacker text or AI-written prose, so the approver cannot be talked into tapping Approve.
+
+Two kinds of approval share the phone:
+- containment     lock / revoke / freeze. Approve = do it, incident contained.
+- false_positive  an analyst says a High/Critical incident was not an attack. Approve = close it
+                  as a false positive (and cancel pending containment). Until then nothing
+                  changes. The approver can't be the person who asked, or anyone who appears
+                  in the incident's events.
 """
 
 from __future__ import annotations
@@ -14,10 +21,13 @@ from datetime import timedelta
 from core.errors import AppError
 from engine.audit import write_audit
 from engine.containment import apply_action
+from engine.incidents import close_as_false_positive
 from engine.scoring import risk_math
-from engine.util import iso, now, parse_ts, safe_name, unique
+from engine.util import involves, iso, now, parse_ts, safe_name, unique
 
 APPROVAL_TIMEOUT_SECONDS = 300
+CONTAINMENT = "containment"
+FALSE_POSITIVE = "false_positive"
 # Incidents in these states can no longer be contained.
 FINISHED = ("closed", "false_positive")
 
@@ -56,6 +66,28 @@ def approval_summary(incident: dict, events: list[dict], actions: list[dict]) ->
     )
 
 
+def false_positive_summary(incident: dict, events: list[dict]) -> str:
+    sensors = unique(e["sensor"] for e in events)
+    math = risk_math([e["risk"] for e in events], len(sensors))
+    listeners = ", ".join(SENSOR_NAMES.get(s, s) for s in sensors) or "no listeners"
+    plural = "s" if len(events) != 1 else ""
+    return (
+        f"Confirm false positive: {str(incident['level']).capitalize()} incident, risk {incident['risk']} "
+        f"({math}). {len(events)} linked event{plural} from {listeners}. "
+        "An analyst says this was not an attack. "
+        "If approved: close the incident as a false positive and cancel any pending containment. "
+        "If denied or unanswered: nothing changes and the incident stays open."
+    )
+
+
+def _kind(approval: dict) -> str:
+    return approval.get("kind") or CONTAINMENT
+
+
+def _events(db, incident_id: str) -> list[dict]:
+    return db.table("events").select("*").eq("incident_id", incident_id).order("created_at").execute().data
+
+
 def _incident(db, incident_id: str) -> dict:
     rows = db.table("incidents").select("*").eq("id", incident_id).limit(1).execute().data
     if not rows:
@@ -74,14 +106,21 @@ def _expire(db, approval: dict) -> None:
     ).data
     if not changed:
         return
-    db.table("incidents").update({"status": "investigating"}).eq("id", approval["incident_id"]).eq(
-        "status", "awaiting_approval"
-    ).execute()
+    if _kind(approval) == CONTAINMENT:
+        db.table("incidents").update({"status": "investigating"}).eq("id", approval["incident_id"]).eq(
+            "status", "awaiting_approval"
+        ).execute()
+    # An unanswered false-positive request changes nothing: the incident simply stays open.
     write_audit(
         db,
         actor="system",
         action="approval_expired",
-        detail={"approval_id": approval["id"], "incident_id": approval["incident_id"], "locked": []},
+        detail={
+            "approval_id": approval["id"],
+            "incident_id": approval["incident_id"],
+            "kind": _kind(approval),
+            "locked": [],
+        },
     )
 
 
@@ -102,18 +141,16 @@ def create_approval(db, incident_id: str, *, requested_by: str = "system") -> di
     if incident["status"] in FINISHED or incident["status"] == "contained":
         raise AppError(409, "incident_not_open", f"This incident is already {incident['status']}")
 
-    pending = (
-        db.table("approvals").select("*").eq("incident_id", incident_id).eq("status", "pending").limit(1).execute()
-    ).data
-    if pending and not _expired(pending[0]):
-        return pending[0]
+    pending = _pending(db, incident_id, CONTAINMENT)
     if pending:
-        _expire(db, pending[0])
+        return pending
 
-    events = db.table("events").select("*").eq("incident_id", incident_id).order("created_at").execute().data
+    events = _events(db, incident_id)
     actions = proposed_actions(events)
     row = {
         "incident_id": incident_id,
+        "kind": CONTAINMENT,
+        "requested_by": requested_by,
         "status": "pending",
         "summary": approval_summary(incident, events, actions),
         "actions": actions,
@@ -130,11 +167,90 @@ def create_approval(db, incident_id: str, *, requested_by: str = "system") -> di
     return approval
 
 
-def decide_approval(db, approval_id: str, *, user_id: str, approve: bool) -> dict:
+def _pending(db, incident_id: str, kind: str) -> dict | None:
+    """The live pending approval of this kind for the incident; a timed-out one is expired first."""
+    rows = (
+        db.table("approvals")
+        .select("*")
+        .eq("incident_id", incident_id)
+        .eq("status", "pending")
+        .eq("kind", kind)
+        .limit(1)
+        .execute()
+    ).data
+    if rows and not _expired(rows[0]):
+        return rows[0]
+    if rows:
+        _expire(db, rows[0])
+    return None
+
+
+def request_false_positive_approval(db, incident: dict, events: list[dict], *, requested_by: str, reason: str) -> dict:
+    """Ask an approver to confirm that a High/Critical incident was a false positive.
+
+    Nothing changes until they approve: the incident stays open and any pending containment
+    stays tappable. Asking again returns the request already waiting.
+    """
+    pending = _pending(db, incident["id"], FALSE_POSITIVE)
+    if pending:
+        return pending
+    row = {
+        "incident_id": incident["id"],
+        "kind": FALSE_POSITIVE,
+        "requested_by": requested_by,
+        "status": "pending",
+        "summary": false_positive_summary(incident, events),
+        "actions": [],
+        "expires_at": iso(now() + timedelta(seconds=APPROVAL_TIMEOUT_SECONDS)),
+    }
+    approval = db.table("approvals").insert(row).execute().data[0]
+    write_audit(
+        db,
+        actor=requested_by,
+        action="false_positive_requested",
+        detail={"approval_id": approval["id"], "incident_id": incident["id"], "reason": reason[:500]},
+    )
+    return approval
+
+
+def _check_false_positive_decider(db, approval: dict, *, user_id: str, approve: bool, identities) -> None:
+    """Two people, and neither of them involved: the asker can't confirm their own request."""
+    if approval.get("requested_by") == f"user:{user_id}":
+        raise AppError(403, "two_person_rule", "Someone other than the person who asked must decide this")
+    if not approve:
+        return  # refusing to dismiss is always safe
+    incident = _incident(db, approval["incident_id"])
+    if incident["status"] in FINISHED or incident["status"] == "contained":
+        raise AppError(409, "incident_not_open", f"This incident is already {incident['status']}")
+    if involves(_events(db, approval["incident_id"]), identities):
+        raise AppError(403, "conflict_of_interest", "You appear in this incident, so another approver must decide")
+
+
+def _cancel_other_pending(db, incident_id: str, *, by: str) -> None:
+    """After containment is approved, a waiting false-positive request is moot."""
+    cancelled = (
+        db.table("approvals")
+        .update({"status": "denied"})
+        .eq("incident_id", incident_id)
+        .eq("status", "pending")
+        .execute()
+    ).data or []
+    if cancelled:
+        write_audit(
+            db,
+            actor=by,
+            action="approval_superseded",
+            detail={"incident_id": incident_id, "cancelled_approvals": [a["id"] for a in cancelled]},
+        )
+
+
+def decide_approval(db, approval_id: str, *, user_id: str, approve: bool, identities=()) -> dict:
     """Approve or deny. The caller must already have checked the JWT and the approver role.
 
-    Approve: carry out the listed actions (entity_state) and mark the incident contained.
-    Deny: nothing is locked; the incident goes back to the analyst.
+    Containment. Approve: carry out the listed actions (entity_state), mark the incident
+    contained. Deny: nothing is locked; the incident goes back to the analyst.
+    False positive. Approve: close the incident as a false positive. Deny: nothing changes.
+    `identities` are the decider's names (core.roles.user_identities), for the conflict check.
     """
     rows = db.table("approvals").select("*").eq("id", approval_id).limit(1).execute().data
     if not rows:
@@ -145,6 +261,9 @@ def decide_approval(db, approval_id: str, *, user_id: str, approve: bool) -> dic
     if _expired(approval):
         _expire(db, approval)
         raise AppError(409, "approval_expired", "This approval timed out. Nothing was locked.")
+    kind = _kind(approval)
+    if kind == FALSE_POSITIVE:
+        _check_false_positive_decider(db, approval, user_id=user_id, approve=approve, identities=identities)
 
     status = "approved" if approve else "denied"
     # The status filter makes a double tap (or two approvers) decide only once.
@@ -164,12 +283,17 @@ def decide_approval(db, approval_id: str, *, user_id: str, approve: bool) -> dic
         db,
         actor=by,
         action=f"approval_{status}",
-        detail={"approval_id": approval_id, "incident_id": approval["incident_id"]},
+        detail={"approval_id": approval_id, "incident_id": approval["incident_id"], "kind": kind},
     )
+    if kind == FALSE_POSITIVE:
+        if approve:
+            close_as_false_positive(db, approval["incident_id"], by=by, approval_id=approval_id)
+        return approval
     if approve:
         for action in approval.get("actions") or []:
             apply_action(db, action, by=by)
         db.table("incidents").update({"status": "contained"}).eq("id", approval["incident_id"]).execute()
+        _cancel_other_pending(db, approval["incident_id"], by=by)
     else:
         db.table("incidents").update({"status": "investigating"}).eq("id", approval["incident_id"]).eq(
             "status", "awaiting_approval"

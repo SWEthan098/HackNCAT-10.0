@@ -92,11 +92,14 @@ def test_deny_from_the_phone(client, fake_db, token_factory):
     assert rows(fake_db, "entity_state") == []
 
 
-def test_false_positive_needs_a_reason(client, fake_db, token_factory):
-    h, _ = as_role(fake_db, token_factory)
-    full_chain(fake_db)
+def test_false_positive_needs_a_reason_and_a_defender_role(client, fake_db, token_factory):
+    plain, _ = as_role(fake_db, token_factory)
+    h, _ = as_role(fake_db, token_factory, "analyst")
+    stage1(fake_db, risk=20)
+    stage1(fake_db, sensor="comms_guard", risk=20)  # 20 + 15 = 35 Medium: closes at once
     incident_id = rows(fake_db, "incidents")[0]["id"]
     url = f"/incidents/{incident_id}/false-positive"
+    assert client.post(url, json={"reason": "known pen test"}, headers=plain).status_code == 403
     assert client.post(url, headers=h).status_code == 422
     assert client.post(url, json={"reason": ""}, headers=h).status_code == 422
     r = client.post(url, json={"reason": "known pen test"}, headers=h)
@@ -105,10 +108,68 @@ def test_false_positive_needs_a_reason(client, fake_db, token_factory):
     assert client.get("/stats", headers=h).json()["false_positives"] == 1
 
 
+def test_critical_false_positive_waits_for_a_second_person(client, fake_db, token_factory):
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    phone, _ = as_role(fake_db, token_factory, "approver")
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    containment = rows(fake_db, "approvals")[0]
+
+    r = client.post(f"/incidents/{incident_id}/false-positive", json={"reason": "pen test"}, headers=analyst)
+    assert r.status_code == 202 and r.json()["status"] == "awaiting_approval"  # nothing changed yet
+    assert containment["status"] == "pending"  # the phone can still contain it
+    request = next(a for a in rows(fake_db, "approvals") if a["kind"] == "false_positive")
+    assert request["summary"].startswith("Confirm false positive: Critical incident, risk 85")
+    assert "pen test" not in request["summary"]  # analyst text never reaches the phone
+
+    r = client.post(f"/approvals/{request['id']}/approve", headers=phone)
+    assert r.status_code == 200 and r.json()["status"] == "approved"
+    assert rows(fake_db, "incidents")[0]["status"] == "false_positive"
+    assert containment["status"] == "denied" and rows(fake_db, "entity_state") == []
+
+
+def test_an_approver_cannot_confirm_their_own_false_positive(client, fake_db, token_factory):
+    approver, _ = as_role(fake_db, token_factory, "approver")
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    r = client.post(f"/incidents/{incident_id}/false-positive", json={"reason": "x"}, headers=approver)
+    assert r.status_code == 202
+    request = next(a for a in rows(fake_db, "approvals") if a["kind"] == "false_positive")
+    r = client.post(f"/approvals/{request['id']}/approve", headers=approver)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "two_person_rule"
+    assert rows(fake_db, "incidents")[0]["status"] == "awaiting_approval"
+
+
+def test_nobody_dismisses_an_incident_they_appear_in(client, fake_db, token_factory):
+    import uuid
+
+    uid = str(uuid.uuid4())
+    fake_db.grant_role(uid, "analyst")
+    fake_db.grant_role(uid, "approver")
+    jsmith = {"Authorization": f"Bearer {token_factory(sub=uid, email='j.smith@cisco.example')}"}
+    full_chain(fake_db)  # j.smith is the taken-over account in every stage
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    r = client.post(f"/incidents/{incident_id}/false-positive", json={"reason": "it was me"}, headers=jsmith)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "conflict_of_interest"
+
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    client.post(f"/incidents/{incident_id}/false-positive", json={"reason": "pen test"}, headers=analyst)
+    request = next(a for a in rows(fake_db, "approvals") if a["kind"] == "false_positive")
+    r = client.post(f"/approvals/{request['id']}/approve", headers=jsmith)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "conflict_of_interest"
+    assert client.post(f"/approvals/{request['id']}/deny", headers=jsmith).status_code == 200  # refusing is safe
+    assert rows(fake_db, "incidents")[0]["status"] == "awaiting_approval"
+
+
 def test_kill_switch_and_freeze(client, fake_db, token_factory):
     import engine
 
-    h, uid = as_role(fake_db, token_factory)
+    plain, _ = as_role(fake_db, token_factory)
+    assert client.post("/killswitch", headers=plain).status_code == 403
+    assert client.post("/agents/finance_agent/freeze", headers=plain).status_code == 403
+    assert not engine.is_frozen(fake_db, "finance_agent")
+
+    h, uid = as_role(fake_db, token_factory, "analyst")
     r = client.post("/agents/finance_agent/freeze", headers=h)
     assert r.status_code == 200 and r.json() == {"ok": True, "detail": "finance_agent frozen"}
     assert engine.is_frozen(fake_db, "finance_agent") and not engine.is_frozen(fake_db, "hr_agent")

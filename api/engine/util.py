@@ -42,6 +42,12 @@ def safe_name(value: str, max_len: int = 60) -> str:
     return cleaned or "unknown"
 
 
+def involves(events: list[dict], identities) -> bool:
+    """True if any of `identities` (lowercase names) is an actor or target in these events."""
+    ids = {i.lower() for i in identities if i}
+    return bool(ids) and any(str(e.get(field) or "").lower() in ids for e in events for field in ("actor", "target"))
+
+
 def unique(items) -> list:
     """De-duplicate, keeping first-seen order."""
     return list(dict.fromkeys(items))

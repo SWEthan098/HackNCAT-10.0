@@ -16,16 +16,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import engine
 from agents.victim.tools import ToolResult
 from firewall import detection, dlp, scoring
 from firewall.detection import DetectorOutcome
-from firewall.integrations import EntityStateReader, record
+from firewall.integrations import EntityStateReader, record, request_approval
 from firewall.policy import AgentPolicy, PolicyError, get_policy
 from firewall.scope import Scope, derive_scope
 from firewall.taint import TaintTracker, labels_requested, recipients
 from firewall.vault import canary_hit, canary_in_args
 from schemas.kairos import Decision, Event, MitreTag, Source, Verdict
 from schemas.mitre import tag
+
+LEVEL_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 # The five layers shown on the /attack page, in order.
 LAYERS = ("injection_scan", "intent_check", "scope_policy", "taint_tracking", "leak_protection")
@@ -51,6 +54,8 @@ class TaskContext:
     canary_hits: int = 0
     injection: list[DetectorOutcome] = field(default_factory=list)  # flagged scans of untrusted content
     scanner_failed: bool = False
+    held_layers: list[str] = field(default_factory=list)  # actions waiting for a human ("Awaiting Approval")
+    approvals: list[str] = field(default_factory=list)
     max_risk: int = 0
     policy_error: str | None = None
 
@@ -150,6 +155,9 @@ class Firewall:
         ctx, policy = self.ctx, self.ctx.policy
         if policy is None:
             return self._block(tool, "scope_policy", f"No valid policy for {ctx.agent}, so nothing may run.")
+        contained = self._check_containment(tool)
+        if contained is not None:
+            return contained
         if not policy.allows_tool(tool):
             return self._block(tool, "scope_policy", f"{ctx.agent} is never allowed to use '{tool}' (policies.yaml).")
         if not ctx.scope.allows(tool):
@@ -180,7 +188,85 @@ class Firewall:
                 "The injection scanner could not check what the agent read, so sensitive actions are blocked.",
                 risk=scoring.SCANNER_FAILURE,
             )
+        if policy.is_sensitive(tool):
+            held = await self._maybe_hold(tool, args)
+            if held is not None:
+                return held
         return self._allow(tool)
+
+    # ---------------------------------------------------------------- containment + auto-hold
+    def _check_containment(self, tool: str) -> Decision | None:
+        """Frozen agent or locked actor = block. The firewall only READS this state; humans change it."""
+        ctx = self.ctx
+        if self.state.agent_frozen(ctx.agent):
+            return self._decide(
+                tool,
+                "blocked",
+                "containment",
+                f"{ctx.agent} is frozen by a human (kill switch or freeze), so it cannot act.",
+                scoring.FROZEN_AGENT,
+                action=f"tool_call_blocked:{tool}:agent_frozen",
+            )
+        if self.state.actor_locked(ctx.actor):
+            return self._decide(
+                tool,
+                "blocked",
+                "containment",
+                f"The account {ctx.actor} is locked pending review, so its assistant cannot act.",
+                scoring.FROZEN_AGENT,
+                action=f"tool_call_blocked:{tool}:actor_locked",
+            )
+        return None
+
+    async def _maybe_hold(self, tool: str, args: dict[str, Any]) -> Decision | None:
+        """Hold an otherwise-allowed sensitive action for a human when the code-computed risk is high."""
+        ctx, policy = self.ctx, self.ctx.policy
+        risk, layer, why = scoring.ALLOWED_SEND, "auto_hold", ""
+        flagged = [o for o in ctx.injection if not o.failed]
+        if flagged:
+            conf = max(o.detection.confidence for o in flagged)
+            risk, layer, why = (
+                scoring.injection_points(conf) + scoring.SENSITIVE_AFTER_INJECTION,
+                "injection_scan",
+                "the agent read content flagged as a prompt injection",
+            )
+        safe_args = {k: dlp.redact(str(v), dlp.PUBLIC).text[:300] for k, v in args.items()}
+        intent = await detection.intent(
+            ctx.user_request, {"tool": tool, "args": safe_args}, enabled=ctx.detectors_enabled
+        )
+        if intent.flagged:
+            points = (
+                scoring.SCANNER_FAILURE
+                if intent.failed
+                else scoring.injection_points(intent.detection.confidence) + scoring.SENSITIVE_AFTER_INJECTION
+            )
+            if points > risk:
+                risk, layer = points, "intent_check"
+                why = "the intent check could not run" if intent.failed else "this action doesn't match your request"
+        if self.state.agent_frozen(ctx.agent) is None and scoring.SCANNER_FAILURE > risk:
+            risk, layer, why = scoring.SCANNER_FAILURE, "containment", "Kairos could not confirm the agent's status"
+        if LEVEL_RANK[engine.score_to_level(risk)] < LEVEL_RANK[policy.requires_approval_at_level]:
+            return None
+        decision = self._decide(
+            tool,
+            "flagged",
+            layer,
+            f"Held for human approval: {why}. Nothing was sent; an approver can release it.",
+            risk,
+            action=f"tool_call_held:{tool}",
+            mitre=self._attack_tags(),
+        )
+        ctx.held_layers.append(layer)
+        event = ctx.events[-1] if ctx.events else None
+        summary = (
+            f"Kairos held a {tool} action by {ctx.agent} for {ctx.actor} "
+            f"(risk {risk}, {engine.score_to_level(risk)}; layer: {layer}). "
+            "Approve to release it or deny to keep it stopped."
+        )
+        approval_id = request_approval(event, summary)
+        if approval_id:
+            ctx.approvals.append(approval_id)
+        return decision
 
     def _check_send(self, args: dict[str, Any]) -> Decision | None:
         ctx, policy = self.ctx, self.ctx.policy

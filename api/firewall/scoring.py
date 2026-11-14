@@ -16,6 +16,7 @@ FROZEN_AGENT = 30  # containment doing its job
 DLP_REDACTED_INTERNAL = 15  # a colleague's reply had an SSN/key stripped
 LINKS_STRIPPED = 20
 SCANNER_FAILURE = 60  # fail closed: unsure means a human looks
+SENSITIVE_AFTER_INJECTION = 20  # a sensitive action in a task where an injection was flagged
 
 
 def injection_points(confidence: float) -> int:

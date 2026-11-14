@@ -11,6 +11,7 @@ containment state is reported as unknown so the caller can hold sensitive action
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,10 +63,22 @@ class EntityState:
 class EntityStateReader:
     """Reads containment state. `db` is a supabase-py client (or the test fake); None = unknown."""
 
+    CACHE_SECONDS = 2.0  # one task makes several checks; a freeze still applies within ~2s
+
     def __init__(self, db: Any | None):
         self.db = db
+        self._cache: dict[str, tuple[float, EntityState | None]] = {}
 
     def get(self, entity: str) -> EntityState | None:
+        hit = self._cache.get(entity)
+        now = time.monotonic()
+        if hit and now - hit[0] < self.CACHE_SECONDS:
+            return hit[1]
+        state = self._lookup(entity)
+        self._cache[entity] = (now, state)
+        return state
+
+    def _lookup(self, entity: str) -> EntityState | None:
         getter = getattr(engine, "get_entity_state", None)
         try:
             if callable(getter):

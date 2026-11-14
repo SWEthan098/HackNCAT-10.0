@@ -14,7 +14,8 @@ import { Alert, Button, ErrorState, IconChevronRight, IconSpark, LoadingState, M
 import { ApiError } from "@/lib/api";
 import { chronological, killChain, scoreBreakdown } from "@/lib/incidents";
 import { ROUTES } from "@/lib/routes";
-import type { AnalystAskResponse, IncidentDetail, KairosEvent, Level, Sensor } from "@/lib/types/kairos";
+import { createClient } from "@/lib/supabase/client";
+import type { AnalystAskResponse, Approval, IncidentDetail, KairosEvent, Level, Sensor } from "@/lib/types/kairos";
 import { AnalystAnswer } from "./AnalystAnswer";
 import { LEVEL_INK, LEVEL_LABELS, LEVEL_SIGNAL, LevelBadge } from "./LevelBadge";
 import { MitreChip } from "./MitreChip";
@@ -35,15 +36,20 @@ const SENSOR_ROLES: Record<Sensor, string> = {
 };
 
 /**
- * PROPOSED endpoints. Neither exists in the frozen contract or in Daylen's plan yet.
- * Until they do, the server answers 404/405 and the UI says the action isn't available;
- * it never pretends to succeed. Agree the final paths with Daylen and change them here.
+ * Daylen's incident action routes (all confirmed live on main). Each returns 404/405 from an
+ * older server and the UI says the action isn't available; it never pretends to succeed.
  */
 export const INCIDENT_ACTIONS = {
   /** Body: none. Expected: the pending Approval it created. */
   requestContainment: (id: string) => `/incidents/${encodeURIComponent(id)}/containment`,
   /** Body: { reason }. Expected: the updated Incident. */
   markFalsePositive: (id: string) => `/incidents/${encodeURIComponent(id)}/false-positive`,
+  /**
+   * Body: none. Expected: a pending 'release' Approval (asking twice returns the same one).
+   * 409 if the incident isn't contained or nothing is still held; 403 if the asker appears
+   * in the incident (someone else must request) or lacks a defender role.
+   */
+  requestRelease: (id: string) => `/incidents/${encodeURIComponent(id)}/release`,
 };
 
 const CLOSED_STATUSES = new Set(["contained", "closed", "false_positive"]);
@@ -378,6 +384,67 @@ function ContainmentDialog({ open, incident, onClose, onDone }: { open: boolean;
   );
 }
 
+function ReleaseDialog({
+  open,
+  incident,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  incident: IncidentDetail;
+  onClose: () => void;
+  onDone: (approval: Approval) => void;
+}) {
+  const { api } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const close = () => {
+    if (busy) return;
+    setError(null);
+    onClose();
+  };
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      // Returns the pending 'release' approval; asking twice returns the same one, so a
+      // reload mid-wait recovers by simply asking again.
+      const approval = await api<Approval>(INCIDENT_ACTIONS.requestRelease(incident.id), { method: "POST" });
+      setBusy(false);
+      onDone(approval);
+    } catch (e) {
+      setError(actionError(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      title="Remove containment?"
+      // Fixed template only - the held account names come back in the server's own
+      // code-templated approval text, never from event data.
+      description="This asks an approver on their phone to unlock the held accounts and unfreeze the agent. Nothing is unlocked until they tap Approve."
+      footer={
+        <>
+          <Button variant="ghost" onClick={close} disabled={busy} autoFocus>
+            Cancel
+          </Button>
+          <Button onClick={submit} loading={busy}>
+            Send to approver
+          </Button>
+        </>
+      }
+    >
+      {error && (
+        <Alert tone="error" title="The unlock was not requested">
+          {error}
+        </Alert>
+      )}
+    </Modal>
+  );
+}
+
 function FalsePositiveDialog({ open, incident, onClose, onDone }: { open: boolean; incident: IncidentDetail; onClose: () => void; onDone: () => void }) {
   const { api } = useAuth();
   const [reason, setReason] = useState("");
@@ -456,12 +523,27 @@ function FalsePositiveDialog({ open, incident, onClose, onDone }: { open: boolea
  */
 type SummaryState = { phase: "idle" | "loading" | "offline" | "error" } | { phase: "done"; answer: string };
 
+/**
+ * Lifting containment. The analyst can't read the approvals table (RLS: approvers only), so
+ * after sending we learn the outcome two honest ways: the incident row flipping to "closed"
+ * over Realtime (approved), and the audit log — readable by every signed-in user — recording
+ * approval_approved / approval_denied / approval_expired for our approval id (polled while
+ * waiting). Nothing is ever assumed.
+ */
+type ReleaseState =
+  | { phase: "idle" }
+  | { phase: "waiting"; approval: Approval }
+  | { phase: "denied" }
+  | { phase: "expired" }
+  | { phase: "approved" };
+
 export function IncidentDetailView({ id }: { id: string }) {
   const { api } = useAuth();
   const [incident, setIncident] = useState<IncidentDetail | null>(null);
   const [error, setError] = useState<{ status: number; message: string } | null>(null);
-  const [dialog, setDialog] = useState<"containment" | "false_positive" | null>(null);
+  const [dialog, setDialog] = useState<"containment" | "false_positive" | "release" | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [release, setRelease] = useState<ReleaseState>({ phase: "idle" });
 
   const load = useCallback(() => {
     api<IncidentDetail>(`/incidents/${encodeURIComponent(id)}`)
@@ -472,6 +554,52 @@ export function IncidentDetailView({ id }: { id: string }) {
       .catch((e) => setError({ status: e instanceof ApiError ? e.status : 0, message: e instanceof ApiError ? e.message : String(e) }));
   }, [api, id]);
   useEffect(load, [load]);
+
+  // Live incident: refetch whenever this row changes (status flips to contained/closed,
+  // summary lands, risk grows). Signed-in users can read incidents, and the table is in the
+  // Realtime publication, so this is the same stream the queue uses.
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`incident-${id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "incidents", filter: `id=eq.${id}` }, () => load())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [id, load]);
+
+  // While a release request waits, poll the audit log (readable by any signed-in user;
+  // approvals rows themselves are approver-only) for the decision on OUR approval id.
+  useEffect(() => {
+    if (release.phase !== "waiting") return;
+    const approvalId = release.approval.id;
+    const supabase = createClient();
+    let stopped = false;
+    const check = async () => {
+      const { data } = await supabase
+        .from("audit_log")
+        .select("action")
+        .in("action", ["approval_approved", "approval_denied", "approval_expired"])
+        .contains("detail", { approval_id: approvalId })
+        .order("id", { ascending: false })
+        .limit(1);
+      if (stopped || !data || data.length === 0) return;
+      const action = data[0].action as string;
+      if (action === "approval_approved") {
+        setRelease({ phase: "approved" });
+        load();
+      } else {
+        setRelease({ phase: action === "approval_denied" ? "denied" : "expired" });
+      }
+    };
+    void check();
+    const t = window.setInterval(() => void check(), 7000);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+    };
+  }, [release, load]);
 
   // Auto-run the AI analyst summary once per incident when none is stored. The ref keeps
   // Realtime refreshes / refetches from firing it again; Re-run goes through summarize() too.
@@ -524,6 +652,10 @@ export function IncidentDetailView({ id }: { id: string }) {
   // The stored summary wins once a refetch brings it in; until then the local answer shows.
   const summaryText = incident.summary ?? (summary.phase === "done" ? summary.answer : null);
 
+  // Approval also shows up as the incident closing (Realtime usually beats the audit poll),
+  // so "approved" is derived here rather than stored: no extra effect, no missed flip.
+  const releaseShown: ReleaseState = release.phase === "waiting" && incident.status === "closed" ? { phase: "approved" } : release;
+
   const closed = CLOSED_STATUSES.has(incident.status);
   const awaiting = incident.status === "awaiting_approval";
   const containReason = closed
@@ -562,6 +694,16 @@ export function IncidentDetailView({ id }: { id: string }) {
               <Button variant="secondary" size="sm" onClick={() => setDialog("false_positive")} disabled={closed}>
                 Mark false positive
               </Button>
+              {incident.status === "contained" && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setDialog("release")}
+                  disabled={releaseShown.phase === "waiting" || releaseShown.phase === "approved"}
+                >
+                  Remove containment
+                </Button>
+              )}
               <Button size="sm" onClick={() => setDialog("containment")} disabled={containReason !== null}>
                 Request containment
               </Button>
@@ -581,6 +723,29 @@ export function IncidentDetailView({ id }: { id: string }) {
         <Alert tone="info" title="Awaiting approval">
           An approver has been asked on their phone. Paused actions stay paused until someone decides; nobody is locked out in
           the meantime.
+        </Alert>
+      )}
+      {releaseShown.phase === "waiting" && (
+        <Alert tone="info" title="Waiting for approver">
+          {/* The request text is the server's code template (never event text), shown verbatim. */}
+          <span className="whitespace-pre-line">{releaseShown.approval.summary}</span> Nothing is unlocked until an approver taps
+          Approve on their phone.
+        </Alert>
+      )}
+      {(releaseShown.phase === "denied" || releaseShown.phase === "expired") && (
+        <Alert tone="error" title={releaseShown.phase === "denied" ? "The approver denied the unlock request" : "The unlock request expired"}>
+          <span className="block">
+            {releaseShown.phase === "denied" ? "Everything stays locked." : "Nobody answered in time, so everything stays locked."}{" "}
+            You can request again.
+          </span>
+          <Button variant="secondary" size="sm" className="mt-2" onClick={() => setDialog("release")}>
+            Request again
+          </Button>
+        </Alert>
+      )}
+      {releaseShown.phase === "approved" && (
+        <Alert tone="success" title="Containment removed">
+          An approver approved the request: held accounts are unlocked, the agent is unfrozen, and the incident is closed.
         </Alert>
       )}
 
@@ -659,6 +824,15 @@ export function IncidentDetailView({ id }: { id: string }) {
           setDialog(null);
           setDone("Marked as false positive");
           load();
+        }}
+      />
+      <ReleaseDialog
+        open={dialog === "release"}
+        incident={incident}
+        onClose={() => setDialog(null)}
+        onDone={(approval) => {
+          setDialog(null);
+          setRelease({ phase: "waiting", approval });
         }}
       />
     </article>

@@ -28,19 +28,22 @@ export function KairosMark({ className }: { className?: string }) {
 }
 
 /**
- * Mark, wordmark and the product area ("Defender Console"), for the SOC-theme bars. Below 640px the area
- * label hides unless `subAlways`. Put it inside a link or heading.
+ * Mark, wordmark and the product area ("Defender Console"), for the SOC-theme bars: the
+ * name stacked over the area (Figma top-bar lockup), so the bar stays tight. Below 640px
+ * the area label hides unless `subAlways`. Put it inside a link or heading.
  */
 export function KairosLockup({ sub, subAlways = false }: { sub?: string; subAlways?: boolean }) {
   return (
     <>
       <KairosMark />
-      <span className="font-display text-xl font-bold leading-none tracking-[var(--tracking-display)]">Kairos</span>
-      {sub && (
-        <span className={cn("border-l border-graphite-2 pl-2.5 text-sm leading-none text-graphite-muted", subAlways ? "inline" : "hidden sm:inline")}>
-          {sub}
-        </span>
-      )}
+      <span className="flex flex-col justify-center gap-0.5">
+        <span className="font-display text-[1.0625rem] font-bold leading-none tracking-[var(--tracking-display)]">Kairos</span>
+        {sub && (
+          <span className={cn("text-[0.6875rem] leading-none text-graphite-muted", subAlways ? "block" : "hidden sm:block")}>
+            {sub}
+          </span>
+        )}
+      </span>
     </>
   );
 }

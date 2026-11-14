@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from engine import incident_risk, score_to_level
-from schemas.mitre import MITRE, tag
+from schemas.mitre import MITRE, TACTIC_ORDER, tag
 
 
 def _auth(token_factory):
@@ -44,6 +44,28 @@ def test_mitre_table_keys():
     assert "prompt_obfuscation" in MITRE
     with pytest.raises(KeyError):
         tag("made_up")
+
+
+def test_mitre_ids_match_verified_releases():
+    """Checked 2026-11-13 against ATT&CK v20.1 and ATLAS 2026.10. Retired IDs must not come back."""
+    ids = {t.technique_id for t in MITRE.values()}
+    assert ids == {
+        "T1110.004",
+        "T1078",
+        "T1534",
+        "T1684.001",
+        "T1657",
+        "AML.T0051.000",
+        "AML.T0051.001",
+        "AML.T0053",
+        "AML.T0054",
+        "AML.T0086",
+        "AML.T0068",
+    }
+    assert tag("impersonation").tactic == "Stealth"
+    assert tag("llm_data_leakage").tactic == "Exfiltration"
+    assert all("VERIFY" not in t.name for t in MITRE.values())
+    assert all(t.tactic in TACTIC_ORDER for t in MITRE.values())
 
 
 def test_public_endpoints_need_no_login(client):

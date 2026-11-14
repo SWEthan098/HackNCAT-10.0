@@ -91,10 +91,30 @@ def test_the_chain_is_the_same_every_run():
 
 
 def test_single_stages_run_on_their_own():
-    assert run("credential_stuffing").outcome == "account_compromised"
-    assert run("impersonation").outcome == "message_delivered"
+    # Each stage alone, on a clean sandbox (the fixture clears the watch list between tests).
+    assert run("impersonation").outcome == "message_delivered"  # nothing has flagged j.smith yet
     assert run("prompt_injection").outcome == "blocked"
+    assert run("credential_stuffing").outcome == "account_compromised"
     assert [len(run(s).events) for s in ("credential_stuffing", "impersonation", "prompt_injection")] == [1, 1, 1]
+
+
+def test_after_the_takeover_the_account_is_under_watch_and_its_wire_request_is_held():
+    chain_run = run()
+    text = "\n".join(chain_run.log_lines)
+    assert "session opened as j.smith" in text  # the takeover still happens: nobody is locked out
+    assert "no delivery receipt: HELD (not in the inbox)" in text and "message delivered" not in text
+    login, message, firewall = chain_run.events
+    assert "under watch" in login.reason
+    assert message.action == "message_challenged" and "under watch" in message.reason
+    # A fixed rule, not a score change: the numbers and the incident math are untouched.
+    assert [e.risk for e in chain_run.events] == [45, 50, 55]
+    assert [e.level for e in chain_run.events] == ["medium", "medium", "medium"]
+    assert comms_guard.held_messages() == [] and chain_run.message_id is None  # nothing was delivered to recall
+
+    # Launching stage 2 again while the account is still under watch: held again.
+    assert run("impersonation").outcome == "message_held"
+    comms_guard.reset_messages()  # Reset demo clears the watch list
+    assert run("impersonation").outcome == "message_delivered"
 
 
 def test_unprotected_mode_leaks_and_records_nothing():
@@ -175,9 +195,11 @@ def test_attacker_log_names_the_email_that_actually_runs(fake_db):
     assert real_email.id in log and real_email.exfil_address in log and seed.EXFIL_ADDRESS not in log
 
 
-def test_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(monkeypatch, fake_db):
-    """Stand-in for Daylen's engine: after each event, if 3 listeners are linked, report Critical."""
-    comms_guard.reset_messages()
+def test_a_delivered_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(monkeypatch, fake_db):
+    """Recall is the backstop for a flagged message that was delivered before anything flagged its sender.
+
+    Stand-in for the engine: after each event, if 3 listeners are linked, report Critical.
+    """
     real_record, seen = engine.record_event, []
 
     def record_and_correlate(**kwargs):
@@ -189,14 +211,13 @@ def test_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(mo
         return event
 
     monkeypatch.setattr(engine, "record_event", record_and_correlate)
-    result = run(db=fake_db)
+    delivered = run("impersonation", db=fake_db)  # the message goes out first
+    assert delivered.outcome == "message_delivered" and delivered.message_id
+    run("prompt_injection", db=fake_db)
+    assert not comms_guard.get_message(delivered.message_id).held
+    run("credential_stuffing", db=fake_db)  # the third listener links in: Critical
+    assert comms_guard.get_message(delivered.message_id).held
     assert [e["action"] for e in fake_db.tables["events"].rows][-1] == "message_recalled"
-    assert result.log_lines[-2] == "wire request to e.cruz@cisco.example: RECALLED (no longer in the inbox)"
-    assert [e.action for e in result.events][-1] == "message_recalled"
-    assert comms_guard.get_message(result.message_id).held
-    # The recall does not change the incident score: still 55 + 30 = 85.
-    assert engine.incident_risk([e.risk for e in result.events], 3) == 85
-    comms_guard.reset_messages()
 
 
 def test_without_an_escalation_nothing_is_recalled():
@@ -231,11 +252,13 @@ def test_endpoint_runs_the_chain_for_red_team_and_saves_the_events(client, fake_
     recorded = [a for a in fake_db.tables["audit_log"].rows if a["action"] == "event_recorded"]
     assert len(recorded) == len(rows)  # the engine audits every recorded event
 
-    # The real engine links all three listeners into ONE Critical incident and recalls the wire request.
+    # The real engine links all three listeners into ONE Critical incident.
     incidents = fake_db.tables["incidents"].rows
     assert [(i["risk"], i["level"]) for i in incidents] == [(85, "critical")]
-    assert rows[-1]["action"] == "message_recalled"
-    assert "wire request to e.cruz@cisco.example: RECALLED (no longer in the inbox)" in r.json()["log_lines"]
+    # j.smith went under watch at stage 1, so the wire request was held, never delivered.
+    assert rows[1]["action"] == "message_challenged" and rows[1]["risk"] == 50
+    assert "no delivery receipt: HELD (not in the inbox)" in r.json()["log_lines"]
+    assert not any(e["action"] == "message_recalled" for e in rows)
 
     bad = client.post("/redteam/run", json={"stage": "rm -rf", "target": "cisco.com"}, headers=headers)
     assert bad.status_code == 422

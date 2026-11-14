@@ -11,7 +11,8 @@ the event through engine.record_event(). Typed content never reaches this module
     Critical block      blocked   last resort; appeal available
 
 A locked account (entity_state.locked, set only by a human-approved containment) always answers
-"account locked". Login Guard never locks an account itself.
+"account locked". Login Guard never locks an account itself. What it does do on a suspected
+takeover is put the account under watch (sensors/watch.py): automatic, reversible, no lockout.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import engine
 from detectors.login import ACCOUNT_TAKEOVER, clean_features, explain, login_risk
 from schemas.kairos import Detection, Event, Level, MitreTag, Source, Verdict
 from schemas.mitre import tag
+from sensors import watch
 from sensors.events import record
 
 logger = logging.getLogger("api.sensors.login_guard")
@@ -46,6 +48,11 @@ USER_MESSAGES: dict[Response, str] = {
 }
 LOCKED_MESSAGE = "Account locked. Please contact IT to verify it's you, or appeal if this looks wrong."
 ACCOUNT_LOCKED = "account locked"
+LATERAL_ATTEMPT = "lateral movement"
+LATERAL_NOTE = "Held by rule: this source already got into another account, so it must verify before trying a new one."
+UNDER_WATCH_NOTE = (
+    "The account is now under watch: it still works, but risky actions from it are held until a person decides."
+)
 LOCKED_RISK = 60  # a try against a contained account is always worth a High alert
 
 
@@ -116,7 +123,21 @@ def handle_login(
         response, verdict = LADDER[level]
         technique = score.technique if risk >= 30 else None
         explanation = f"{explain(score)} Response: {response}."
+
+        # Fixed rule, separate from the score: a source that already took over an account is
+        # asked to verify as soon as it tries a different one (lateral movement).
+        known = watch.watched_source(actor, source=source)
+        if known is not None and username not in known.accounts and response in ("watched", "slowed"):
+            response, verdict = "challenged", "flagged"
+            technique = technique or LATERAL_ATTEMPT
+            explanation += f" {LATERAL_NOTE}"
         user_message = USER_MESSAGES[response]
+
+        # A sign-in that succeeds right after repeated failures: stop trusting the account, without
+        # locking anyone out. Risky actions from it are held until a person decides.
+        if score.technique == ACCOUNT_TAKEOVER and risk >= 30 and response != "blocked":
+            watch.watch_takeover(username, source=source, by=actor)
+            explanation += f" {UNDER_WATCH_NOTE}"
 
     detection = Detection(
         flagged=verdict != "allowed", confidence=risk / 100, technique=technique, explanation=explanation

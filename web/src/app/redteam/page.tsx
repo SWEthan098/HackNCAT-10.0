@@ -91,7 +91,7 @@ function stageOfLine(line: string): string | null {
 }
 
 function lineClass(line: string): string {
-  if (/ACCESS DENIED|NOT DELIVERED|RECALLED|account locked|Attack stopped|^! /i.test(line)) return "rt-line-denied";
+  if (/ACCESS DENIED|NOT DELIVERED|RECALLED|HELD|account locked|Attack stopped|^! /i.test(line)) return "rt-line-denied";
   if (/ACCEPTED|SUCCESS|session opened|delivered$/.test(line)) return "rt-line-win";
   if (line.startsWith("$ ")) return "rt-line-command";
   if (line.startsWith("[stage") || line.startsWith("===")) return "rt-line-head";
@@ -102,7 +102,8 @@ function lineClass(line: string): string {
 const STAMPS: Record<string, { title: string; detail: string; tone: "denied" | "win" | "neutral" }> = {
   blocked: { title: "Access denied", detail: "Nothing left the company", tone: "denied" },
   account_locked: { title: "Account locked", detail: "The way in is closed", tone: "denied" },
-  message_held: { title: "Message held", detail: "Waiting on a human check", tone: "denied" },
+  message_held: { title: "Message held", detail: "It never reached the inbox", tone: "denied" },
+  challenged: { title: "Verification required", detail: "The sign-in was not let through", tone: "denied" },
   leaked: { title: "Payroll exfiltrated", detail: "No defender in the path", tone: "win" },
   account_compromised: { title: "Account compromised", detail: "Signed in as j.smith", tone: "win" },
   message_delivered: { title: "Message delivered", detail: "Finance has the wire request", tone: "win" },

@@ -30,16 +30,21 @@ def _db(request: Request):
         return None
 
 
-def _device(request: Request) -> str:
-    """One-way label for the caller's device. The address itself is never stored or logged."""
+def _device(request: Request, nickname: str) -> str:
+    """One-way label for one visitor: network address + codename. Neither is stored or logged.
+
+    The codename is part of the key because a whole room on the same Wi-Fi shares one address;
+    keyed by address alone, thirty judges would share one visitor's allowance.
+    """
     forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
     host = forwarded or (request.client.host if request.client else "unknown")
-    return hashlib.sha256(f"kairos-playground:{host}".encode()).hexdigest()[:16]
+    who = playground.clean_nickname(nickname)
+    return hashlib.sha256(f"kairos-playground:{host}:{who}".encode()).hexdigest()[:16]
 
 
 @router.post("/launch", response_model=PlaygroundLaunchResponse, summary="Launch an audience attack")
 async def launch(body: PlaygroundLaunchRequest, request: Request, db=Depends(_db)) -> PlaygroundLaunchResponse:
-    wait = limiter.check(_device(request))
+    wait = limiter.check(_device(request, body.nickname))
     if wait:
         raise AppError(429, "rate_limited", f"The defenders are busy, retry in {wait}s")
     result = await playground.launch(body.attack_type, body.settings, body.nickname, db=db, request=request)

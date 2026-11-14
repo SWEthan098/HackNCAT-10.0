@@ -103,7 +103,8 @@ class LLMPlanner:
 
 _MAIL_WORDS = re.compile(r"\b(inbox|mailbox|e-?mails|messages|my e-?mail|my mail)\b", re.I)
 _SEND_TO = re.compile(
-    r"\b(?:send|forward|e-?mail|mail|share)\b[^\n]{0,160}?\bto\s+([\w.+-]+@[\w-]+(?:\.[\w-]+)+)", re.I
+    r"\b(?:send|forward|e-?mail|mail|share)\b[^\n]{0,160}?\bto\s+(?:me\s+at\s+|me,?\s+)?([\w.+-]+@[\w-]+(?:\.[\w-]+)+)",
+    re.I,
 )
 _SHOW_WORDS = re.compile(r"\b(show|what|list|tell|read|print|display|give|contents?)\b", re.I)
 

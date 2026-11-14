@@ -18,7 +18,7 @@ from typing import Any
 
 import engine
 from agents.victim.tools import ToolResult
-from firewall import detection, dlp, scoring
+from firewall import detection, dlp, rules, scoring
 from firewall.detection import DetectorOutcome
 from firewall.integrations import EntityStateReader, record, request_approval
 from firewall.policy import AgentPolicy, PolicyError, get_policy
@@ -364,15 +364,18 @@ class Firewall:
     async def _scan_untrusted(self, text: str, origin: str, *, indirect: bool) -> DetectorOutcome:
         ctx = self.ctx
         outcome = await detection.scan(text, enabled=ctx.detectors_enabled)
+        backstop = rules.keyword_scan(text)  # code rules: on even when the AI detectors are off
+        if not outcome.flagged and backstop.flagged:
+            outcome = DetectorOutcome(backstop)
         if not outcome.flagged:
             return outcome
         ctx.injection.append(outcome)
         ctx.scanner_failed = ctx.scanner_failed or outcome.failed
         d = outcome.detection
         keys = ["prompt_injection_indirect" if indirect else "prompt_injection_direct"]
-        if detection.is_obfuscation(d):
+        if detection.is_obfuscation(d) or detection.is_obfuscation(backstop):
             keys.append("prompt_obfuscation")
-        if detection.is_jailbreak(d):
+        if detection.is_jailbreak(d) or detection.is_jailbreak(backstop):
             keys.append("llm_jailbreak")
         risk = scoring.SCANNER_FAILURE if outcome.failed else scoring.injection_points(d.confidence)
         what = "could not be scanned" if outcome.failed else "contains instructions aimed at the AI"

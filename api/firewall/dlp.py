@@ -49,7 +49,7 @@ _ALWAYS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 _PUBLIC_ONLY: list[tuple[str, re.Pattern[str]]] = [
-    ("salary", re.compile(r"\$\s?\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\$\s?\d{4,}(?:\.\d{2})?|\b\d{2,3}(?:\.\d)?k\b", re.I)),
+    ("salary", re.compile(r"\$\s?\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\$\s?\d{4,}(?:\.\d{2})?", re.I)),
     ("account_number", re.compile(r"\b\d{8,17}\b")),
     ("phone", re.compile(r"(?<!\d)(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d)")),
     ("birth_date", re.compile(r"(?i)\b(?:dob|born|birth(?:day|date)?)\b[^\n]{0,20}?\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}")),

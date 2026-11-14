@@ -26,6 +26,7 @@ from limits.storage import MemoryStorage
 from limits.strategies import MovingWindowRateLimiter
 from slowapi.util import get_remote_address
 
+import engine
 from agents.victim.fixtures import GUEST_ACCOUNTS, Email
 from agents.victim.planner import AgentOffline
 from agents.victim.runner import AGENT, AgentOutcome, run_agent
@@ -130,8 +131,10 @@ def _save_in_background(db, row: dict) -> None:
 
 
 def _save_attempt(db, row: dict) -> None:
+    """Daylen's publish_attempt: the team-only `attempts` row + the sanitized `public_feed` copy
+    that drives the live "N attacks, 0 breaches" counter."""
     try:
-        db.table("attempts").insert(row).execute()
+        engine.publish_attempt(db, **row)
     except Exception as e:  # stats are nice-to-have; never fail the response over them
         logger.warning("attack: could not save attempt (%s)", type(e).__name__)
 

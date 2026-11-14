@@ -323,12 +323,7 @@ class Firewall:
         ctx.held_layers.append(layer)
         await self._flush()  # the approval needs the saved event (and its incident)
         event = ctx.events[-1] if ctx.events else None
-        summary = (
-            f"Kairos held a {tool} action by {ctx.agent} for {ctx.actor} "
-            f"(risk {risk}, {engine.score_to_level(risk)}; layer: {layer}). "
-            "Approve to release it or deny to keep it stopped."
-        )
-        approval_id = request_approval(event, summary)
+        approval_id = await asyncio.to_thread(request_approval, self.db, event, requested_by=f"firewall:{ctx.agent}")
         if approval_id:
             ctx.approvals.append(approval_id)
         return decision

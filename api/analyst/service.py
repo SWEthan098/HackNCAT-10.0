@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,11 +27,12 @@ from agents.victim.tools import ToolResult
 from analyst.data import AnalystData
 from core.config import get_settings
 from firewall.core import Firewall
-from firewall.integrations import EntityStateReader, request_approval
+from firewall.integrations import EntityStateReader
 from schemas.mitre import MITRE, TACTIC_ORDER
 from services.ai.base import AIProviderError, ChatMessage
 
 AGENT = "security_analyst"
+logger = logging.getLogger("api.analyst")
 ACTIONS = {"lock_account": "lock the account", "revoke_sessions": "revoke sessions", "freeze_agent": "freeze the agent"}
 _INCIDENT_ID = re.compile(r"\b(inc-[\w-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b", re.I)
 _ENTITY = re.compile(r"\b(judge:[\w-]+|guest\d{2}|[a-z]\.[a-z]+|finance_agent|bot:[\d.]+)\b", re.I)
@@ -162,16 +164,34 @@ async def ask(
     if tri:
         tail = f"\nTriage: {tri.text()} ({tri.priority}): {tri.reason}." + tail
 
-    approval_id = await _maybe_propose(fw, reply.get("propose"), incident, events)
+    approval_id = await _maybe_propose(fw, reply.get("propose"), incident, events, data)
     if approval_id:
         tail += "\nA containment request is waiting for human approval on /approve."
     answer = await fw.filter_output(text + tail)
     return AnalystAnswer(answer, citations, cited_mitre, tri, approval_id, fw)
 
 
-async def summarize_incident(incident_id: str, *, data: AnalystData, ai, state=None) -> AnalystAnswer:
-    """Incident summary + triage label for the incident detail screen (Daylen/Jordan call this)."""
-    return await ask(f"Summarize incident {incident_id}: what happened, in order.", data=data, ai=ai, state=state)
+async def summarize_incident(
+    incident_id: str, *, data: AnalystData, ai, state=None, save: bool = True
+) -> AnalystAnswer:
+    """Incident summary + triage label for the incident detail screen. With `save`, stores both on
+    the incident via engine.set_incident_summary (explains only; never changes risk or status)."""
+    result = await ask(f"Summarize incident {incident_id}: what happened, in order.", data=data, ai=ai, state=state)
+    if save and result.triage is not None and data.db is not None and not data.demo:
+        await asyncio.to_thread(_save_summary, data.db, incident_id, result)
+    return result
+
+
+def _save_summary(db: Any, incident_id: str, result: AnalystAnswer) -> None:
+    import engine
+
+    setter = getattr(engine, "set_incident_summary", None)
+    if not callable(setter):
+        return
+    try:
+        setter(db, incident_id, summary=result.answer, triage_label=result.triage.text())
+    except Exception as e:
+        logger.warning("analyst: set_incident_summary failed (%s)", type(e).__name__)
 
 
 # ------------------------------------------------------------------------------ helpers
@@ -264,7 +284,11 @@ def _template_reply(question: str, incident, events: list[dict], tri: Triage | N
     return {"answer": text, "citations": [str(e.get("id")) for e in ordered], "propose": propose}
 
 
-async def _maybe_propose(fw: Firewall, propose: Any, incident: dict | None, events: list[dict]) -> str | None:
+async def _maybe_propose(
+    fw: Firewall, propose: Any, incident: dict | None, events: list[dict], data: AnalystData
+) -> str | None:
+    """The analyst's ONLY effect: a pending approval. Daylen's engine writes the approval text and
+    actions from code templates; the model's wording never reaches the approver."""
     if not isinstance(propose, dict) or incident is None:
         return None
     action, entity = str(propose.get("action", "")), str(propose.get("entity", ""))
@@ -274,27 +298,18 @@ async def _maybe_propose(fw: Firewall, propose: Any, incident: dict | None, even
     decision = await fw.before_tool("propose_response", {"action": action, "entity": entity})
     if decision.verdict != "allowed":
         return None
-    summary = (
-        f"Kairos analyst recommends: {ACTIONS[action]} for {entity} "
-        f"(incident risk {incident.get('risk')}, {incident.get('level')}). Approve to apply, deny to dismiss."
-    )
-    event = fw.ctx.events[-1] if fw.ctx.events else None
-    approval_id = _create_pending(incident, summary, action, entity)
-    return approval_id or request_approval(event, summary)
+    return await asyncio.to_thread(_create_pending, data.db, str(incident["id"]))
 
 
-def _create_pending(incident: dict, summary: str, action: str, entity: str) -> str | None:
+def _create_pending(db: Any, incident_id: str) -> str | None:
     import engine
 
     create = getattr(engine, "create_approval", None)
-    if not callable(create):
+    if not callable(create) or db is None:
         return None
     try:
-        approval = create(
-            incident_id=str(incident["id"]), summary=summary, actions=[{"type": action, "entity": entity}]
-        )
-    except TypeError:
-        approval = create(incident_id=str(incident["id"]), summary=summary)
-    except Exception:
+        approval = create(db, incident_id, requested_by="analyst")
+    except Exception as e:  # e.g. incident already contained (409) or unknown (404)
+        logger.warning("analyst: create_approval failed (%s)", type(e).__name__)
         return None
     return getattr(approval, "id", None) or (approval.get("id") if isinstance(approval, dict) else None)

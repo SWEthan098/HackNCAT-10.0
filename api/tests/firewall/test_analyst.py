@@ -35,12 +35,18 @@ def test_incident_summary_cites_events_and_mitre():
 
 def test_analyst_is_read_only_and_proposes_only_when_asked(monkeypatch):
     created = []
-    monkeypatch.setattr(engine, "create_approval", lambda **kw: created.append(kw) or {"id": "apr-9"}, raising=False)
-    plain = _ask("Summarize incident inc-demo")
+
+    def fake_create(db, incident_id, *, requested_by="system"):
+        created.append({"incident_id": incident_id, "requested_by": requested_by})
+        return {"id": "apr-9"}
+
+    monkeypatch.setattr(engine, "create_approval", fake_create)
+    data = AnalystData(object(), demo=True)  # demo events, but a db so the approval can be created
+    plain = _ask("Summarize incident inc-demo", data=data)
     assert plain.approval_id is None and created == []
-    advice = _ask("What just happened in inc-demo and what should I do?")
+    advice = _ask("What just happened in inc-demo and what should I do?", data=data)
     assert advice.approval_id == "apr-9" and created[0]["incident_id"] == "inc-demo"
-    assert "j.smith" in created[0]["summary"] and "waiting for human approval" in advice.answer
+    assert created[0]["requested_by"] == "analyst" and "waiting for human approval" in advice.answer
     used = {d.tool for d in advice.firewall.ctx.decisions}
     assert used <= {"get_incident", "query_events", "get_entity_history", "propose_response", "scan", "reply"}
 

@@ -22,6 +22,7 @@ from firewall.integrations import EntityStateReader, record
 from firewall.policy import AgentPolicy, PolicyError, get_policy
 from firewall.scope import Scope, derive_scope
 from firewall.taint import TaintTracker, labels_requested, recipients
+from firewall.vault import canary_hit, canary_in_args
 from schemas.kairos import Decision, Event, MitreTag, Source, Verdict
 from schemas.mitre import tag
 
@@ -46,6 +47,7 @@ class TaskContext:
     blocked_layers: list[str] = field(default_factory=list)
     untrusted_seen: bool = False
     taint: TaintTracker = field(default_factory=TaintTracker)
+    canary_hits: int = 0
     max_risk: int = 0
     policy_error: str | None = None
 
@@ -155,6 +157,15 @@ class Firewall:
             )
         if tool == "read_file" and not policy.path_allowed(str(args.get("path", ""))):
             return self._block(tool, "scope_policy", "That file is outside the folders this agent may read.")
+        if canary_in_args(args):
+            self.ctx.canary_hits += 1
+            return self._block(
+                tool,
+                "leak_protection",
+                "The secret vault code appeared in this action, so it was stopped.",
+                risk=scoring.LEAK_OR_CANARY,
+                extra=("llm_data_leakage",),
+            )
         if tool == "send_email":
             blocked = self._check_send(args)
             if blocked is not None:
@@ -207,4 +218,16 @@ class Firewall:
         return f"<<UNTRUSTED {result.origin}>>\n{result.content}\n<<END UNTRUSTED>>"
 
     async def filter_output(self, text: str) -> str:
+        if canary_hit(text):
+            self.ctx.canary_hits += 1
+            self._decide(
+                "reply",
+                "blocked",
+                "leak_protection",
+                "The reply contained the secret vault code, so it was withheld.",
+                scoring.LEAK_OR_CANARY,
+                action="output_blocked:canary",
+                mitre=self._attack_tags("llm_data_leakage"),
+            )
+            return "I can't share that. (Kairos withheld this reply because it contained protected data.)"
         return text

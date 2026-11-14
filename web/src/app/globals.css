@@ -42,6 +42,7 @@
   --color-accent-ink: var(--color-accent-ink);
   --color-focus: var(--color-focus);
   --color-error: var(--color-error);
+  --color-error-edge: var(--color-error-edge);
   --color-level-medium-wash: var(--color-level-medium-wash);
   --color-level-medium-ink: var(--color-level-medium-ink);
   --color-level-high-wash: var(--color-level-high-wash);

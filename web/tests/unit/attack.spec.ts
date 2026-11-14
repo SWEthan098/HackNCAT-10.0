@@ -192,7 +192,7 @@ test("feedCounts: attacks is every row, stopped is blocked or flagged verdicts",
     ...Array.from({ length: 15 }, () => feedRow("flagged")),
     ...Array.from({ length: 8 }, () => feedRow("allowed")),
   ];
-  expect(feedCounts(rows)).toEqual({ attacks: 43, stopped: 35, breaches: null });
+  expect(feedCounts(rows)).toEqual({ attacks: 43, stopped: 35, harmless: null, breaches: null });
 });
 
 test("without a breach field there is no breaches figure, whatever the layers say", () => {
@@ -204,7 +204,22 @@ test("without a breach field there is no breaches figure, whatever the layers sa
   ];
   const counts = feedCounts(rows);
   expect(counts.breaches).toBeNull();
+  // "allowed" alone is NOT harmless: without the breach column those 8 could include breaches.
+  expect(counts.harmless).toBeNull();
   expect(counterText(counts)).toBe("43 attacks · 35 stopped");
+});
+
+test("harmless counts allowed rows with breach === false, and the three-way split sums to the total", () => {
+  const rows = [
+    ...Array.from({ length: 20 }, () => feedRow("blocked", { breach: false })),
+    ...Array.from({ length: 15 }, () => feedRow("flagged", { breach: false })),
+    ...Array.from({ length: 11 }, () => feedRow("allowed", { breach: false })),
+    ...Array.from({ length: 2 }, () => feedRow("allowed", { breach: true })),
+  ];
+  const counts = feedCounts(rows);
+  expect(counts).toEqual({ attacks: 48, stopped: 35, harmless: 11, breaches: 2 });
+  expect((counts.stopped ?? 0) + (counts.harmless ?? 0) + (counts.breaches ?? 0)).toBe(counts.attacks);
+  expect(counterText(counts)).toBe("48 attacks · 35 stopped · 11 harmless · 2 breaches");
 });
 
 test("breaches counts rows with breach === true, and only that", () => {
@@ -214,33 +229,38 @@ test("breaches counts rows with breach === true, and only that", () => {
     feedRow("allowed", { breach: true, layers_reached: 2 }), // breach even at 2 layers: field wins
   ];
   const counts = feedCounts(rows);
-  expect(counts).toEqual({ attacks: 43, stopped: 35, breaches: 1 });
-  expect(counterText(counts)).toBe("43 attacks · 35 stopped · 1 breach");
+  expect(counts).toEqual({ attacks: 43, stopped: 35, harmless: 7, breaches: 1 });
+  expect(counterText(counts)).toBe("43 attacks · 35 stopped · 7 harmless · 1 breach");
   // All-false breach column is an honest 0, not an omitted segment.
   const clean = feedCounts(rows.slice(0, 42));
   expect(clean.breaches).toBe(0);
-  expect(counterText(clean)).toBe("42 attacks · 35 stopped · 0 breaches");
+  expect(counterText(clean)).toBe("42 attacks · 35 stopped · 7 harmless · 0 breaches");
 });
 
 test("only a real boolean breach field is trusted (strings and nulls are not the column)", () => {
   expect(feedCounts([feedRow("allowed", { breach: "true" })]).breaches).toBeNull();
   expect(feedCounts([feedRow("allowed", { breach: null })]).breaches).toBeNull();
   expect(feedCounts([feedRow("allowed", { breach: 1 })]).breaches).toBeNull();
+  // The same junk never produces a harmless figure either (allowed, but breach is unknowable).
+  expect(feedCounts([feedRow("allowed", { breach: "true" })]).harmless).toBeNull();
+  expect(feedCounts([feedRow("allowed", { breach: null })]).harmless).toBeNull();
+  expect(feedCounts([feedRow("allowed", { breach: 1 })]).harmless).toBeNull();
 });
 
 test("a partial scan shows only the exact attacks total, never guessed figures", () => {
-  expect(feedCounts([feedRow("blocked")], 5)).toEqual({ attacks: 5, stopped: null, breaches: null });
+  expect(feedCounts([feedRow("blocked")], 5)).toEqual({ attacks: 5, stopped: null, harmless: null, breaches: null });
   expect(counterText(feedCounts([feedRow("blocked")], 5))).toBe("5 attacks");
+  expect(feedCounts([feedRow("allowed", { breach: false })], 5).harmless).toBeNull();
   // A stale/garbage total never shrinks below what we actually scanned.
   expect(feedCounts([feedRow("blocked"), feedRow("allowed")], 1).attacks).toBe(2);
-  expect(feedCounts([], 0)).toEqual({ attacks: 0, stopped: 0, breaches: null });
+  expect(feedCounts([], 0)).toEqual({ attacks: 0, stopped: 0, harmless: null, breaches: null });
 });
 
 test("counterText pluralises and stays phone-width short", () => {
-  expect(counterText({ attacks: 1, stopped: 0, breaches: 1 })).toBe("1 attack · 0 stopped · 1 breach");
-  expect(counterText({ attacks: 1200, stopped: 1199, breaches: 0 })).toBe("1,200 attacks · 1,199 stopped · 0 breaches");
-  expect(counterText({ attacks: 47, stopped: 12, breaches: null })).toBe("47 attacks · 12 stopped");
-  expect(counterText({ attacks: 47, stopped: null, breaches: null })).toBe("47 attacks");
+  expect(counterText({ attacks: 1, stopped: 0, harmless: 0, breaches: 1 })).toBe("1 attack · 0 stopped · 0 harmless · 1 breach");
+  expect(counterText({ attacks: 1200, stopped: 1188, harmless: 11, breaches: 1 })).toBe("1,200 attacks · 1,188 stopped · 11 harmless · 1 breach");
+  expect(counterText({ attacks: 47, stopped: 12, harmless: null, breaches: null })).toBe("47 attacks · 12 stopped");
+  expect(counterText({ attacks: 47, stopped: null, harmless: null, breaches: null })).toBe("47 attacks");
 });
 
 test("ready-made tricks fit the limit and never name a real domain", () => {

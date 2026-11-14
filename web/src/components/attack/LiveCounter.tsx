@@ -1,9 +1,11 @@
 "use client";
 
-// Live "N attacks · N stopped · N breaches" from public_feed (anon read + Realtime). If it
-// can't load, it says so. It never shows a made-up number: breaches come ONLY from a real
-// boolean `breach` column (feature-detected per load; until Daylen's column lands the segment
-// is omitted), never inferred from layers_reached.
+// Live "N attacks · N stopped · N harmless · N breaches" from public_feed (anon read +
+// Realtime). If it can't load, it says so. It never shows a made-up number: breaches come ONLY
+// from a real boolean `breach` column (feature-detected per load; until Daylen's column lands
+// the segment is omitted), never inferred from layers_reached. Harmless is just as strict:
+// verdict "allowed" AND breach false, hidden until the breach column exists (an "allowed" row
+// without it could still be a breach).
 
 import { useEffect, useState } from "react";
 import { FEED_SCAN_LIMIT, type FeedCounts, counterText, feedCounts } from "@/lib/attack";

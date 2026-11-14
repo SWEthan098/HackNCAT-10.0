@@ -292,6 +292,13 @@ export type FeedCounts = {
   /** Rows whose verdict is blocked or flagged. null when the scan was partial (unknowable). */
   stopped: number | null;
   /**
+   * Rows the data affirmatively marks as answered-but-harmless: verdict "allowed" AND
+   * `breach === false`. null (segment omitted) until the rows carry the boolean `breach`
+   * column, because an "allowed" row without it could still be a breach — we never promote
+   * "not stopped" to "harmless" by guesswork.
+   */
+  harmless: number | null;
+  /**
    * Rows whose `breach` field is `true` — and ONLY that. null (segment omitted) until the rows
    * actually carry a boolean `breach` column: a row that merely lacks the field is never shown
    * as "0 breaches", and layers_reached NEVER counts as a breach (all five layers read "passed"
@@ -307,12 +314,15 @@ export type FeedCounts = {
  */
 export function feedCounts(rows: readonly unknown[], exactTotal?: number): FeedCounts {
   let stopped = 0;
+  let harmless = 0;
   let breaches = 0;
   let sawBreachField = false;
   for (const raw of rows) {
     if (typeof raw !== "object" || raw === null) continue;
     const row = raw as Record<string, unknown>;
     if (typeof row.verdict === "string" && (STOPPED_VERDICTS as readonly string[]).includes(row.verdict)) stopped += 1;
+    // Harmless only when the row SAYS so on both fields: answered ("allowed") and no breach.
+    if (row.verdict === "allowed" && row.breach === false) harmless += 1;
     if (typeof row.breach === "boolean") {
       sawBreachField = true;
       if (row.breach) breaches += 1;
@@ -324,18 +334,20 @@ export function feedCounts(rows: readonly unknown[], exactTotal?: number): FeedC
   return {
     attacks,
     stopped: partial ? null : stopped,
+    harmless: partial || !sawBreachField ? null : harmless,
     breaches: partial || !sawBreachField ? null : breaches,
   };
 }
 
 /**
- * "43 attacks · 35 stopped · 0 breaches". A segment appears only when it is honestly known
- * (see FeedCounts); middle dots keep it one short line at phone width.
+ * "43 attacks · 35 stopped · 7 harmless · 0 breaches". A segment appears only when it is
+ * honestly known (see FeedCounts); middle dots keep it one short line at phone width.
  */
 export function counterText(counts: FeedCounts): string {
   const n = (v: number) => v.toLocaleString("en-US");
   const parts = [`${n(counts.attacks)} ${counts.attacks === 1 ? "attack" : "attacks"}`];
   if (counts.stopped !== null) parts.push(`${n(counts.stopped)} stopped`);
+  if (counts.harmless !== null) parts.push(`${n(counts.harmless)} harmless`);
   if (counts.breaches !== null) parts.push(`${n(counts.breaches)} ${counts.breaches === 1 ? "breach" : "breaches"}`);
   return parts.join(" · ");
 }

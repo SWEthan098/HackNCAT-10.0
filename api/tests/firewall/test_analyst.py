@@ -93,3 +93,39 @@ def test_model_invented_mitre_ids_are_fixed_or_dropped():
 
     out = fix_mitre_ids("stuffing (AML.T1110.004), injection T0051.001, made up T9999 and AML.T0054")
     assert out == "stuffing (T1110.004), injection AML.T0051.001, made up [unverified technique] and AML.T0054"
+
+
+def test_answer_shape_short_labels_and_split_tail():
+    r = _ask("What just happened in inc-demo and what should I do?")
+    body, tail = r.answer.split("\n\nTriage:")
+    assert body.startswith("What happened:\n1. ") and "\n\nWhy it matters: " in body and "\n\nNext step: " in body
+    assert "(E1)" in body and "evt-1" not in r.answer  # labels in text, full IDs only in citations
+    assert r.citations == ["evt-1", "evt-2", "evt-3"]
+    lines = ("Triage:" + tail).splitlines()
+    mitre = next(line for line in lines if line.startswith("MITRE: "))
+    assert mitre.startswith("MITRE: Credential Stuffing (T1110.004) → Valid Accounts (T1078) → ")
+    assert "LLM Prompt Injection: Indirect (AML.T0051.001)" in mitre
+    assert "Evidence: E1, E2, E3" in lines
+
+
+def test_long_event_ids_written_by_the_model_become_labels():
+    from analyst.service import _shorten_ids
+
+    eid = "3f2c9a10-1b2c-4d5e-8f90-123456789abc"
+    text = f"Bot hit j.smith (event {eid}) and again [{eid}]."
+    assert _shorten_ids(text, {eid: "E1"}) == "Bot hit j.smith (E1) and again E1."
+
+
+def test_model_citations_may_use_labels(monkeypatch):
+    import analyst.service as svc
+
+    async def fake_model(*_a, **_k):
+        return {"answer": "What happened:\n1. Bot broke in. (E1)", "citations": ["E1", "E3", "nope"]}
+
+    monkeypatch.setattr(svc, "_model_reply", fake_model)
+
+    class Live:
+        provider = type("P", (), {"name": "anthropic"})()
+
+    r = asyncio.run(ask("Summarize inc-demo", data=AnalystData(None, demo=True), ai=Live(), state=StaticEntityState()))
+    assert r.citations == ["evt-1", "evt-3"] and "Evidence: E1, E3" in r.answer

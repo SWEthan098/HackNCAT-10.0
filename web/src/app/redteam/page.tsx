@@ -90,7 +90,7 @@ function stageOfLine(line: string): string | null {
 }
 
 function lineClass(line: string): string {
-  if (/ACCESS DENIED|NOT DELIVERED|account locked|Attack stopped|^! /i.test(line)) return "rt-line-denied";
+  if (/ACCESS DENIED|NOT DELIVERED|RECALLED|account locked|Attack stopped|^! /i.test(line)) return "rt-line-denied";
   if (/ACCEPTED|SUCCESS|session opened|delivered$/.test(line)) return "rt-line-win";
   if (line.startsWith("$ ")) return "rt-line-command";
   if (line.startsWith("[stage") || line.startsWith("===")) return "rt-line-head";

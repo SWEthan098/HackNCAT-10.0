@@ -93,6 +93,7 @@ _ACTION_PHRASES: dict[str, str] = {
     "message_slowed": "sent {target} a message posing as a boss and asking for money to be moved",
     "message_challenged": "sent {target} a high-pressure money request, which was held for verification",
     "message_blocked": "sent {target} a high-pressure money request, which was not delivered",
+    "message_recalled": "had the flagged message to {target} pulled back and put on hold once the incident escalated",
     "send_email_blocked": "planted an email that told the AI assistant {target} to send payroll outside the company; the firewall blocked it and nothing left",
 }
 _LISTENERS = {"login_guard": "Login Guard", "comms_guard": "Comms Guard", "agent_firewall": "Agent Firewall"}
@@ -248,7 +249,7 @@ def mock_summary(incident: IncidentDetail) -> str:
     if listeners >= 2 and events:
         top, bonus = max(e.risk for e in events), 15 * (listeners - 1)
         sentences.append(
-            f"On their own these were rated {', '.join(str(e.risk) for e in events)}, but they are linked, "
+            f"On their own these were rated {', '.join(str(e.risk) for e in events if e.action != 'message_recalled')}, but they are linked, "
             f"so the incident scores {top} + {bonus} = {incident.risk} ({incident.level})."
         )
     leaked = any(e.verdict == "allowed" and e.sensor == "agent_firewall" and e.risk >= 85 for e in events)

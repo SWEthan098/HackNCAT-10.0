@@ -14,12 +14,23 @@ sending account and the target is the recipient, so a taken-over account links i
     Critical blocked     blocked   not delivered; appeal available
 
 It prompts verification instead of accusing the sender.
+
+Recall on escalation: a Medium message is delivered with a warning, so a recipient could still act
+on it. Comms Guard therefore remembers every flagged message it delivered, and
+`on_incident_escalated(events, level)` (called by the engine when an incident reaches Critical)
+pulls those messages back and puts them on hold. A hold is reversible: `release_message()` puts
+a message back once a person has verified it. The record is in memory (one API process), holds
+no message text, and is cleared by `reset_messages()`.
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
+from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import engine
@@ -48,6 +59,11 @@ USER_MESSAGES: dict[Response, str] = {
 }
 
 
+RECALL_AT_LEVEL: Level = "critical"
+RECALL_NOTICE = "This message was pulled back and is on hold. Please verify the request with the sender another way."
+MAX_TRACKED_MESSAGES = 500
+
+
 @dataclass(frozen=True)
 class MessageResult:
     verdict: Verdict
@@ -57,6 +73,27 @@ class MessageResult:
     response: Response
     user_message: str
     event: Event | None
+    message_id: str | None = None  # set when the message was flagged but delivered (recallable)
+
+
+@dataclass
+class TrackedMessage:
+    """A flagged message that was delivered with a warning. No message text is kept."""
+
+    id: str
+    actor: str  # who the event was attributed to (the sending account, or judge:<nickname>)
+    sender: str
+    recipient: str
+    source: Source
+    risk: int
+    mitre: list[MitreTag]
+    delivered_at: datetime
+    held: bool = False
+    held_at: datetime | None = None
+    recall_event: Event | None = None
+
+
+_delivered: deque[TrackedMessage] = deque(maxlen=MAX_TRACKED_MESSAGES)
 
 
 def entity_name(address: str) -> str:
@@ -133,4 +170,90 @@ async def handle_message(
             reason=detection.explanation,
             mitre=_mitre(score, sender, score.risk),
         )
-    return MessageResult(verdict, detection, score.risk, level, response, USER_MESSAGES[response], event)
+    message_id = None
+    if response == "slowed":  # flagged, but delivered with a warning: remember it so it can be recalled
+        message_id = str(uuid.uuid4())
+        _delivered.append(
+            TrackedMessage(
+                id=message_id,
+                actor=actor or sender_entity,
+                sender=sender_entity,
+                recipient=entity_name(to),
+                source=source,
+                risk=score.risk,
+                mitre=_mitre(score, sender, score.risk),
+                delivered_at=datetime.now(UTC),
+            )
+        )
+    return MessageResult(verdict, detection, score.risk, level, response, USER_MESSAGES[response], event, message_id)
+
+
+# ---- recall on escalation ------------------------------------------------------------------
+
+
+def hold_flagged_messages(actors: Iterable[str], *, source: Source) -> list[TrackedMessage]:
+    """Pull back every flagged, delivered message attributed to these actors (same source only).
+
+    Safe to call again: a message that is already on hold is skipped, so nothing is held or
+    recorded twice. Each recall is recorded as an event with the SAME risk as the original
+    message, so it explains the action without raising the incident score.
+    """
+    wanted = set(actors)
+    held: list[TrackedMessage] = []
+    for message in _delivered:
+        if message.held or message.source != source or message.actor not in wanted:
+            continue
+        message.held, message.held_at = True, datetime.now(UTC)
+        held.append(message)
+        message.recall_event = engine.record_event(
+            sensor="comms_guard",
+            actor=message.actor,
+            target=message.recipient,
+            source=source,
+            action="message_recalled",
+            risk=message.risk,
+            verdict="blocked",
+            reason=(
+                f"A flagged message from {message.sender} to {message.recipient} had been delivered with a warning. "
+                "It was pulled back and put on hold because the linked incident reached "
+                f"{RECALL_AT_LEVEL}. The hold is reversible: the recipient can release it after verifying."
+            ),
+            mitre=message.mitre,
+        )
+    return held
+
+
+def on_incident_escalated(events: Iterable[Event], level: Level) -> list[TrackedMessage]:
+    """Hook for the engine: call when an incident's level changes. Acts only at Critical."""
+    if level != RECALL_AT_LEVEL:
+        return []
+    events = list(events)
+    if not events:
+        return []
+    sources = {e.source for e in events}
+    held: list[TrackedMessage] = []
+    for source in sources:
+        held += hold_flagged_messages({e.actor for e in events if e.source == source}, source=source)
+    return held
+
+
+def get_message(message_id: str | None) -> TrackedMessage | None:
+    return next((m for m in _delivered if m.id == message_id), None)
+
+
+def held_messages() -> list[TrackedMessage]:
+    return [m for m in _delivered if m.held]
+
+
+def release_message(message_id: str) -> bool:
+    """A person verified the request: put the message back. Returns False if it was not on hold."""
+    message = get_message(message_id)
+    if message is None or not message.held:
+        return False
+    message.held, message.held_at = False, None
+    return True
+
+
+def reset_messages() -> None:
+    """Forget every tracked message (Reset demo)."""
+    _delivered.clear()

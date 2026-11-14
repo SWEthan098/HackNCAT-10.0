@@ -6,6 +6,7 @@ import asyncio
 
 import engine
 from redteam import chain, firewall_bridge, seed
+from sensors import comms_guard
 
 
 def run(stage="full_chain", mode="protected", db=None):
@@ -131,6 +132,37 @@ def test_stage_three_uses_the_scripted_stand_in_until_the_firewall_is_ready():
     outcome = asyncio.run(firewall_bridge.run_stage3("protected"))
     assert firewall_bridge.FIREWALL_READY is False and outcome.via == "scripted"
     assert outcome.blocked and outcome.event.risk == firewall_bridge.BLOCKED_HIJACK_RISK == 55
+
+
+def test_wire_request_is_recalled_once_the_engine_reports_a_critical_incident(monkeypatch):
+    """Stand-in for Daylen's engine: after each event, if 3 listeners are linked, report Critical."""
+    comms_guard.reset_messages()
+    real_record, seen = engine.record_event, []
+
+    def record_and_correlate(**kwargs):
+        event = real_record(**kwargs)
+        seen.append(event)
+        if len({e.sensor for e in seen}) == 3:
+            risk = engine.incident_risk([e.risk for e in seen], 3)
+            comms_guard.on_incident_escalated(list(seen), engine.score_to_level(risk))
+        return event
+
+    monkeypatch.setattr(engine, "record_event", record_and_correlate)
+    result = run()
+    assert result.log_lines[-2] == "wire request to e.cruz@cisco.example: RECALLED (no longer in the inbox)"
+    assert [e.action for e in result.events][-1] == "message_recalled"
+    assert comms_guard.get_message(result.message_id).held
+    # The recall does not change the incident score: still 55 + 30 = 85.
+    assert engine.incident_risk([e.risk for e in result.events], 3) == 85
+    comms_guard.reset_messages()
+
+
+def test_without_an_escalation_nothing_is_recalled():
+    comms_guard.reset_messages()
+    result = run()
+    assert not any("RECALLED" in line for line in result.log_lines)
+    assert len(result.events) == 3 and comms_guard.held_messages() == []
+    comms_guard.reset_messages()
 
 
 def test_endpoint_runs_the_chain(client, token_factory):

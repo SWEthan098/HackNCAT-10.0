@@ -34,7 +34,7 @@ from redteam.seed import (
     read_file,
 )
 from schemas.kairos import Event
-from sensors.comms_guard import handle_message
+from sensors.comms_guard import get_message, handle_message
 from sensors.login_guard import handle_login, is_locked
 
 Stage = Literal["credential_stuffing", "impersonation", "prompt_injection", "full_chain"]
@@ -73,6 +73,7 @@ class StageResult:
     outcome: str
     log_lines: list[str] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
+    message_id: str | None = None  # stage 2: the delivered wire request, if Comms Guard is tracking it
 
     @property
     def stopped(self) -> bool:
@@ -151,6 +152,7 @@ async def stage2_impersonation(mode: Mode, db: Any = None) -> StageResult:
             sender=sender, to=recipient, body=FAKE_CFO_MESSAGE, source="scripted", db=db, use_model=False
         )
         result.events.append(guard.event)
+        result.message_id = guard.message_id
         if guard.response == "blocked":
             log.append("message rejected: NOT DELIVERED")
             result.outcome = "blocked"
@@ -209,5 +211,11 @@ async def run(stage: Stage, mode: Mode = "protected", db: Any = None) -> StageRe
         chain.log_lines += step.log_lines
         chain.events += step.events
     chain.outcome = steps[-1].outcome
+    # If the incident escalated, Comms Guard has pulled the wire request back out of the inbox.
+    recalled = next((m for m in map(get_message, (s.message_id for s in steps)) if m and m.held), None)
+    if recalled is not None:
+        chain.message_id = recalled.id
+        chain.events.append(recalled.recall_event)
+        chain.log_lines.append(f"wire request to {_address(recalled.recipient)}: RECALLED (no longer in the inbox)")
     chain.log_lines.append(f"=== chain finished: {chain.outcome} ===")
     return chain

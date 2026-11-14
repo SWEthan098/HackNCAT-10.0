@@ -11,6 +11,7 @@ from core.config import get_settings
 from detectors import classify_message, classify_message_mock, comms
 from detectors.comms import message_risk
 from redteam import seed
+from sensors import comms_guard
 from sensors.comms_guard import USER_MESSAGES, entity_name, handle_message
 from services.ai import AIProviderError
 
@@ -221,3 +222,62 @@ def test_endpoint_needs_login_and_returns_the_final_shape(client, token_factory)
     r = client.post("/sensors/message", json=body, headers={"Authorization": f"Bearer {token_factory()}"})
     assert r.status_code == 200 and r.json()["verdict"] == "flagged"
     assert r.json()["detection"]["technique"] == "impersonation"
+
+
+# ---- recall on escalation --------------------------------------------------------------
+
+
+@pytest.fixture
+def ledger():
+    comms_guard.reset_messages()
+    yield
+    comms_guard.reset_messages()
+
+
+def test_flagged_but_delivered_messages_are_tracked_without_their_text(ledger):
+    medium = guard(FAKE_CFO_WIRE)
+    assert medium.response == "slowed" and medium.message_id
+    tracked = comms_guard.get_message(medium.message_id)
+    assert (tracked.actor, tracked.sender, tracked.recipient, tracked.risk) == ("j.smith", "j.smith", "e.cruz", 50)
+    assert "wire" not in repr(tracked).lower() and not tracked.held
+    # Normal mail is not tracked; held or blocked mail was never delivered, so there is nothing to recall.
+    assert guard(NORMAL).message_id is None
+    assert guard(LOUD_FAKE_CEO).message_id is None
+
+
+def test_escalation_to_critical_pulls_the_message_back(ledger):
+    medium = guard(FAKE_CFO_WIRE)
+    assert comms_guard.on_incident_escalated([medium.event], "high") == []  # not yet
+    held = comms_guard.on_incident_escalated([medium.event], "critical")
+    assert [m.id for m in held] == [medium.message_id] and comms_guard.held_messages() == held
+    recall = held[0].recall_event
+    assert (recall.action, recall.verdict, recall.actor, recall.target) == (
+        "message_recalled",
+        "blocked",
+        "j.smith",
+        "e.cruz",
+    )
+    assert recall.risk == medium.risk  # explains the action without raising the incident score
+    assert "reversible" in recall.reason and "verify" in comms_guard.RECALL_NOTICE
+
+
+def test_recall_is_idempotent_and_reversible(ledger):
+    medium = guard(FAKE_CFO_WIRE)
+    assert len(comms_guard.on_incident_escalated([medium.event], "critical")) == 1
+    assert comms_guard.on_incident_escalated([medium.event], "critical") == []  # nothing held or recorded twice
+    assert comms_guard.release_message(medium.message_id) is True
+    assert comms_guard.held_messages() == [] and comms_guard.release_message(medium.message_id) is False
+    assert comms_guard.release_message("no-such-message") is False
+
+
+def test_recall_only_touches_the_incidents_own_actors_and_source(ledger):
+    scripted = guard(FAKE_CFO_WIRE)
+    judge = guard(FAKE_CFO_WIRE, sender="guest03@cisco.example", to="guest07@cisco.example", actor="judge:falcon")
+    other = guard(FAKE_CFO_WIRE, sender="guest11@cisco.example", to="guest12@cisco.example", actor="judge:hawk")
+    assert judge.event.source == "scripted"  # this helper always uses the scripted source
+    held = comms_guard.hold_flagged_messages({"judge:falcon"}, source="scripted")
+    assert [m.id for m in held] == [judge.message_id]
+    assert comms_guard.hold_flagged_messages({"j.smith"}, source="audience") == []  # wrong source: no merge
+    assert not comms_guard.get_message(scripted.message_id).held
+    assert not comms_guard.get_message(other.message_id).held
+    assert comms_guard.on_incident_escalated([], "critical") == []

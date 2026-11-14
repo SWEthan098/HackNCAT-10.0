@@ -27,7 +27,9 @@ export default function ConsolePage() {
           <IncidentQueue />
         </Suspense>
         <div className="flex min-w-0 flex-col gap-3 sm:gap-4 min-[900px]:sticky min-[900px]:top-[4.25rem] min-[900px]:max-h-[calc(100dvh-7rem)]">
-          <TopTechniques events={live.events} demo={demo} />
+          {/* shrink-0: inside the max-h sticky rail, only the feed may give up height —
+              otherwise this panel gets squashed under it. */}
+          <TopTechniques events={live.events} demo={demo} className="shrink-0" />
           <LiveEventFeed live={live} className="min-h-0 flex-1" />
         </div>
       </div>

@@ -13,6 +13,11 @@ export type Alarm = {
   /** Start the repeating two-tone sound (no-op if not armed or already ringing). */
   ring: () => void;
   stop: () => void;
+  /**
+   * Hear about audio context state changes (phones suspend it on screen lock or when the
+   * tab is backgrounded). Returns an unsubscribe. No-op before the first arm().
+   */
+  onStateChange: (cb: () => void) => () => void;
 };
 
 export function createAlarm(): Alarm {
@@ -61,12 +66,22 @@ export function createAlarm(): Alarm {
     armed: () => ctx !== null && ctx.state === "running",
     ring() {
       if (!ctx || timer !== undefined) return;
+      // The OS suspends audio on screen lock / backgrounding; try to pick it back up
+      // before ringing. If the browser refuses without a fresh tap, the context stays
+      // suspended and onStateChange lets the page fall back to its "tap" prompt.
+      if (ctx.state !== "running") void ctx.resume();
       burst();
       timer = window.setInterval(burst, 1600);
     },
     stop() {
       if (timer !== undefined) window.clearInterval(timer);
       timer = undefined;
+    },
+    onStateChange(cb) {
+      if (!ctx) return () => {};
+      const target = ctx;
+      target.addEventListener("statechange", cb);
+      return () => target.removeEventListener("statechange", cb);
     },
   };
 }

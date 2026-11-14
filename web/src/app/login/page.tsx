@@ -109,14 +109,7 @@ export default function LoginPage() {
     <AuthShell
       title="Log in"
       description="Use the email and password you signed up with."
-      footer={
-        <>
-          New here?{" "}
-          <Link href={ROUTES.signup} className="text-accent underline-offset-4 hover:underline">
-            Create an account
-          </Link>
-        </>
-      }
+      footer={<>Accounts are set up by the Kairos team for the demo.</>}
     >
       <Suspense>
         <LoginForm />

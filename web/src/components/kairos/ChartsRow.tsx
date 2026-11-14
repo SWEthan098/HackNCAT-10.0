@@ -94,11 +94,11 @@ export function ChartsRow({ events, demo }: { events: KairosEvent[] | null; demo
 }
 
 /** Most-seen MITRE techniques this session (right rail, above the live feed). */
-export function TopTechniques({ events, demo }: { events: KairosEvent[] | null; demo?: boolean }) {
+export function TopTechniques({ events, demo, className }: { events: KairosEvent[] | null; demo?: boolean; className?: string }) {
   const rows = useMemo(() => topTechniques(events ?? []), [events]);
   if (rows.length === 0) return null;
   return (
-    <Panel title="Top techniques" meta={<span>{demo ? "demo data" : "this session"}</span>}>
+    <Panel title="Top techniques" meta={<span>{demo ? "demo data" : "this session"}</span>} className={className}>
       <HBars
         rows={rows.map((t) => ({
           key: t.id,

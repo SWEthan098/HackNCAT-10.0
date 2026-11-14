@@ -51,14 +51,16 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hou
 
 export function ApprovalPhoneView({
   approvals,
-  baselineIds,
   live,
   onDecide,
 }: {
   /** null while loading. */
   approvals: ApprovalRow[] | null;
-  /** Ids present at first load: these never ring (only requests that arrive later do). */
-  baselineIds: ReadonlySet<string> | null;
+  /**
+   * Ids present at first load. Kept for callers, but no longer silences anything: a
+   * request still waiting when the page loads must alarm too (a reload used to mute it).
+   */
+  baselineIds?: ReadonlySet<string> | null;
   live: "connecting" | "live" | "down";
   onDecide: (id: string, decision: Decision) => Promise<ApprovalRow>;
 }) {
@@ -85,8 +87,10 @@ export function ApprovalPhoneView({
   }, [approvals, now]);
 
   // Rows past their deadline are not pending here: they never ring and get no buttons.
+  // ANY undecided pending request raises the red screen - including one already waiting
+  // when the page loaded: before the alarm is armed it shows "Tap to sound the alarm".
   const pending = (approvals ?? []).filter((a) => canDecide(a, now));
-  const ringing = baselineIds ? pending.find((a) => !baselineIds.has(a.id) && !acknowledged.has(a.id)) ?? null : null;
+  const ringing = approvals === null ? null : (pending.find((a) => !acknowledged.has(a.id)) ?? null);
   const overlayOpen = testing || ringing !== null;
 
   const alarm = () => (alarmRef.current ??= createAlarm());
@@ -106,13 +110,23 @@ export function ApprovalPhoneView({
   }, [overlayOpen]);
 
   // The wake lock drops whenever the page is hidden; take it back when it's shown again.
+  // And phones suspend the audio context on screen lock / backgrounding: when it is no
+  // longer running, stop claiming "Alarm sound is on" and fall back to the tap prompt.
   useEffect(() => {
     if (!armed) return;
+    const check = () => {
+      if (!(alarmRef.current?.armed() ?? false)) setArmed(false);
+    };
     const onVisible = () => {
       if (document.visibilityState === "visible") void keepScreenOn(() => setWake("released")).then(setWake);
+      check();
     };
+    const unsubscribe = alarmRef.current?.onStateChange(check);
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    return () => {
+      unsubscribe?.();
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [armed]);
 
   const arm = () => {
@@ -301,6 +315,13 @@ export function ApprovalPhoneView({
             </p>
           </div>
           <div className="flex flex-col gap-3">
+            {!armed && !testing && (
+              // A reload lands here silently (browsers only allow sound after a tap):
+              // the red screen still shows, and this tap turns the sound on.
+              <Button size="lg" variant="secondary" className="h-14 w-full text-lg" icon={<IconAlert size={20} />} onClick={arm}>
+                Tap to sound the alarm
+              </Button>
+            )}
             {!testing && ringing && decisionButtons(ringing, true)}
             <button type="button" className={cn(onRedButton, "h-11 rounded-input underline underline-offset-4")} onClick={dismiss}>
               {testing ? "Stop the test" : "Silence and decide later"}

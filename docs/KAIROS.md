@@ -3,7 +3,8 @@
 Kairos (Cisco track) watches a fictional company ("Cisco" on the fake domain `cisco.example`) with
 three listeners, scores every event 0-100 in code, connects related events into incidents, stops
 dangerous AI actions automatically, and asks a human to approve anything disruptive.
-Full plan: the team Notion page. This file is the source of truth for **who edits what**.
+Full plan: [PLAN.md](PLAN.md). Per-person checklists: [team/](team/). This file is the source of
+truth for **who edits what**.
 Using Claude Code? It auto-loads [CLAUDE.md](../CLAUDE.md); start by telling it who you are
 ("I'm Miles, P2").
 

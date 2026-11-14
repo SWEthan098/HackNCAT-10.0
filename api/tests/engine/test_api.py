@@ -14,6 +14,8 @@ from .helpers import as_role, full_chain, rows, stage1
         ("get", "/incidents/00000000-0000-0000-0000-000000000001"),
         ("post", "/incidents/00000000-0000-0000-0000-000000000001/containment"),
         ("post", "/incidents/00000000-0000-0000-0000-000000000001/false-positive"),
+        ("post", "/incidents/00000000-0000-0000-0000-000000000001/release"),
+        ("post", "/killswitch/off"),
         ("post", "/approvals/00000000-0000-0000-0000-000000000001/approve"),
         ("post", "/approvals/00000000-0000-0000-0000-000000000001/deny"),
         ("get", "/appeals"),
@@ -176,6 +178,147 @@ def test_kill_switch_and_freeze(client, fake_db, token_factory):
     assert client.post("/killswitch", headers=h).json()["ok"] is True
     assert engine.is_frozen(fake_db, "hr_agent")
     assert rows(fake_db, "audit_log")[-1]["actor"] == f"user:{uid}"
+
+
+def _contained(client, fake_db, phone) -> str:
+    """Run the full chain and approve its containment: j.smith locked, finance_agent frozen."""
+    full_chain(fake_db)
+    containment = rows(fake_db, "approvals")[0]
+    assert client.post(f"/approvals/{containment['id']}/approve", headers=phone).status_code == 200
+    return containment["incident_id"]
+
+
+def test_release_goes_through_the_phone(client, fake_db, token_factory):
+    import engine
+    from sensors import watch
+
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    phone, phone_id = as_role(fake_db, token_factory, "approver")
+    plain, _ = as_role(fake_db, token_factory)
+    incident_id = _contained(client, fake_db, phone)
+    watch.reset()
+    watch.watch_takeover("j.smith", source="scripted", by="bot:203.0.113.7")
+    url = f"/incidents/{incident_id}/release"
+
+    assert client.post(url).status_code == 401
+    assert client.post(url, headers=plain).status_code == 403
+    r = client.post(url, headers=analyst)
+    assert r.status_code == 200, r.text
+    approval = r.json()
+    assert approval["status"] == "pending" and approval["incident_id"] == incident_id
+    assert approval["summary"].startswith("Unlock j.smith and unfreeze finance_agent? ")
+    assert client.post(url, headers=analyst).json()["id"] == approval["id"]  # asking twice: same one
+    assert engine.is_locked(fake_db, "j.smith")  # nothing undone yet
+
+    r = client.post(f"/approvals/{approval['id']}/approve", headers=phone)
+    assert r.status_code == 200 and r.json()["decided_by"] == phone_id
+    assert not engine.is_locked(fake_db, "j.smith") and not engine.is_frozen(fake_db, "finance_agent")
+    assert watch.watched_account("j.smith", source="scripted", actor="j.smith") is None
+    assert rows(fake_db, "incidents")[0]["status"] == "closed"
+    actions = {r["action"] for r in rows(fake_db, "audit_log")}
+    assert {"release_requested", "account_unlocked", "agent_unfrozen"} <= actions
+    assert client.post(url, headers=analyst).status_code == 409  # no longer contained
+    watch.reset()
+
+
+def test_release_rules(client, fake_db, token_factory):
+    import uuid
+
+    import engine
+
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    phone, _ = as_role(fake_db, token_factory, "approver")
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    url = f"/incidents/{incident_id}/release"
+    r = client.post(url, headers=analyst)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "incident_not_contained"
+    client.post(f"/approvals/{rows(fake_db, 'approvals')[0]['id']}/approve", headers=phone)
+
+    # j.smith can't ask to unlock themselves, nor approve it.
+    uid = str(uuid.uuid4())
+    fake_db.grant_role(uid, "analyst")
+    fake_db.grant_role(uid, "approver")
+    jsmith = {"Authorization": f"Bearer {token_factory(sub=uid, email='j.smith@cisco.example')}"}
+    assert client.post(url, headers=jsmith).json()["error"]["code"] == "conflict_of_interest"
+    request = client.post(url, headers=analyst).json()
+    r = client.post(f"/approvals/{request['id']}/approve", headers=jsmith)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "conflict_of_interest"
+
+    # The approver who asked can't approve their own request; deny keeps everything locked.
+    mine = client.post(f"/approvals/{request['id']}/deny", headers=phone)
+    assert mine.status_code == 200 and engine.is_locked(fake_db, "j.smith")
+    request = client.post(url, headers=phone).json()
+    r = client.post(f"/approvals/{request['id']}/approve", headers=phone)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "two_person_rule"
+    assert rows(fake_db, "incidents")[0]["status"] == "contained"
+
+
+def test_release_only_lists_what_is_still_held(client, fake_db, token_factory):
+    from engine.containment import unlock_account
+
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    phone, _ = as_role(fake_db, token_factory, "approver")
+    incident_id = _contained(client, fake_db, phone)
+    unlock_account(fake_db, "j.smith", by="test")
+    request = client.post(f"/incidents/{incident_id}/release", headers=analyst).json()
+    assert request["summary"].startswith("Unfreeze finance_agent? ")
+    assert rows(fake_db, "approvals")[-1]["actions"] == [{"action": "unfreeze_agent", "entity": "finance_agent"}]
+
+
+def test_kill_switch_off_needs_an_approver(client, fake_db, token_factory):
+    import engine
+
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    phone, _ = as_role(fake_db, token_factory, "approver")
+    client.post("/killswitch", headers=analyst)
+    assert client.post("/killswitch/off", headers=analyst).status_code == 403  # stopping is easy, undoing is not
+    assert engine.is_frozen(fake_db, "hr_agent")
+    assert client.post("/killswitch/off", headers=phone).status_code == 200
+    assert not engine.is_frozen(fake_db, "hr_agent")
+
+
+def test_false_positive_on_a_contained_incident_offers_to_undo_it(client, fake_db, token_factory):
+    import engine
+
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    phone, _ = as_role(fake_db, token_factory, "approver")
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    containment = rows(fake_db, "approvals")[0]
+    assert client.post(f"/approvals/{containment['id']}/approve", headers=phone).status_code == 200
+    assert engine.is_locked(fake_db, "j.smith") and engine.is_frozen(fake_db, "finance_agent")
+
+    r = client.post(f"/incidents/{incident_id}/false-positive", json={"reason": "pen test"}, headers=analyst)
+    assert r.status_code == 202 and r.json()["status"] == "contained"  # nothing undone yet
+    request = next(a for a in rows(fake_db, "approvals") if a["kind"] == "false_positive")
+    assert "unlock account j.smith" in request["summary"] and "unfreeze agent finance_agent" in request["summary"]
+    assert engine.is_locked(fake_db, "j.smith")
+
+    r = client.post(f"/approvals/{request['id']}/approve", headers=phone)
+    assert r.status_code == 200, r.text
+    assert rows(fake_db, "incidents")[0]["status"] == "false_positive"
+    assert not engine.is_locked(fake_db, "j.smith") and not engine.is_frozen(fake_db, "finance_agent")
+
+
+def test_denying_a_contained_false_positive_keeps_the_containment(client, fake_db, token_factory):
+    import engine
+
+    analyst, _ = as_role(fake_db, token_factory, "analyst")
+    phone, _ = as_role(fake_db, token_factory, "approver")
+    full_chain(fake_db)
+    incident_id = rows(fake_db, "incidents")[0]["id"]
+    client.post(f"/approvals/{rows(fake_db, 'approvals')[0]['id']}/approve", headers=phone)
+    from engine.containment import unlock_account
+
+    unlock_account(fake_db, "j.smith", by="test")  # already released some other way
+
+    client.post(f"/incidents/{incident_id}/false-positive", json={"reason": "x"}, headers=analyst)
+    request = next(a for a in rows(fake_db, "approvals") if a["kind"] == "false_positive")
+    assert request["actions"] == [{"action": "unfreeze_agent", "entity": "finance_agent"}]  # only what's still on
+    assert client.post(f"/approvals/{request['id']}/deny", headers=phone).status_code == 200
+    assert rows(fake_db, "incidents")[0]["status"] == "contained"
+    assert engine.is_frozen(fake_db, "finance_agent")
 
 
 def test_audit_verify_endpoint(client, fake_db, token_factory):

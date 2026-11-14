@@ -54,9 +54,7 @@ def close_as_false_positive(
     happen now (Low/Medium) or needs an approver first (High/Critical). Every other pending
     approval for the incident is cancelled, since a false alarm must not stay tappable.
     """
-    row = _row(db, incident_id)
-    if row["status"] == "contained":
-        raise AppError(409, "incident_contained", "This incident was already contained by an approver")
+    _row(db, incident_id)  # 404 for unknown ids
     db.table("incidents").update({"status": "false_positive"}).eq("id", incident_id).execute()
     cancelled = (
         db.table("approvals")
